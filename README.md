@@ -169,6 +169,47 @@ Right-click the tray icon for: Show/Hide, Refresh, Re-login, Settings, Exit.
 
 Opt in via Settings → "Show taskbar stats" (off by default) to show session and weekly usage directly on the taskbar icon: split into left (session) and right (weekly) panels, colored by threshold the same way the tray icons and progress bars are, with a white X at 99–100%. Click the icon to toggle the main window, same as before. Requires "Hide from taskbar" to be off, since that setting removes the taskbar presence entirely in favor of tray-only mode.
 
+### Scheduled session start (experimental)
+
+In Settings, enable **Start session at**, choose a time and **Local** or **Cloud**,
+then click **Save**. The default is **off**, with 06:00 as the start time.
+The widget always uses Haiku 4.5 to send a tiny arithmetic prompt using your existing Claude login.
+Saving does not send a prompt immediately. A time already passed schedules the next day.
+
+- **Local:** requires the computer awake, online, and the widget running (including
+  in the tray). It checks for an active five-hour window before sending. Existing
+  windows and starts missed by more than five minutes are skipped. There is at most
+  one attempt per local calendar day, even after restarts or time edits. An explicit
+  HTTP 400 rejection can be re-armed by choosing a new future time and clicking Save.
+  Failed or ambiguous requests are never retried automatically. Errors appear in Settings;
+  hover over the info icon for requirements and scheduling details.
+- **Cloud:** creates an Anthropic Routine with Haiku 4.5, a minimal cloud
+  environment, no repositories or connectors, and a prompt asking it not to use tools. It runs while the widget
+  and computer are off. Cloud requires Routines access on your Claude account;
+  account verification or changes to the private API can prevent setup. Such errors
+  remain visible in Settings. Routine creation and updates never call Run now.
+- Cloud schedules use **UTC**, converted from the selected local time when saved.
+  After changing timezone or a daylight-saving change, open Settings and click Save
+  to resave the intended wall time. Execution may be a few minutes late. Unlike the
+  local path, the cloud routine cannot check the widget's usage counter first, so it
+  also sends its tiny prompt when a window is already active.
+- Turning the feature off or switching to Local pauses the cloud routine first.
+  This requires internet access; a failed pause does not enable local scheduling.
+  Logging out or changing organization also pauses/disables the current schedule.
+  **Closing or uninstalling the widget does not stop a cloud routine.** Use its
+  **Manage cloud routine in Claude** link to pause or delete it independently.
+
+The feature uses a small amount of your subscription allowance and does not increase
+weekly limits. Neither a completion nor the configured start time guarantees an exact
+reset time: the usage timestamp reported by Claude remains authoritative.
+
+To test Local manually: choose a time about five minutes ahead, select Local, enable
+the checkbox and click Save. Leave the widget and computer running. Inspect Settings
+after that time. Test Cloud separately when no session window is active.
+
+Offline scheduling/API-adapter checks (no real prompts or cloud mutations):
+`node --test test/session-starter.test.js`
+
 ### Multi-Account Support (Advanced)
 
 Launch with `--profile=<name>` to run a fully isolated instance — its own session, cookies, and settings — so you can track two Claude accounts side by side without them interfering.

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, session, shell, Notification, safeStorage, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, session, shell, Notification, safeStorage, nativeImage, screen, powerMonitor } = require('electron');
 
 // Linux/Wayland: force Xwayland compat mode so the second system tray icon
 // (weekly) renders — Electron only gives the *first* Tray() instance real
@@ -48,6 +48,10 @@ const { fetchViaWindow, fetchMultipleViaWindow } = require('./src/fetch-via-wind
 const { normalizeUsageLimits } = require('./src/normalize-usage-limits');
 const { recoverBounds, clearsVisibilityThreshold } = require('./src/window-bounds');
 const { detectActiveCreditSpend } = require('./src/detect-active-credit-spend');
+
+const { SessionStarter } = require('./src/session-starter');
+const { SessionStarterAPI } = require('./src/session-starter-api');
+const { sessionStarterRequest } = require('./src/session-starter-request');
 
 const GITHUB_OWNER = 'SlavomirDurej';
 const GITHUB_REPO = 'claude-usage-widget';
@@ -301,6 +305,18 @@ let weeklyTray = null;   // Tray icon for Weekly usage
 // this, app.quit() can't be told apart from a user clicking the close
 // button to just minimize -- both arrive as the same window 'close' event.
 let isQuitting = false;
+
+const sessionStarter = new SessionStarter({
+  store,
+  api: new SessionStarterAPI(sessionStarterRequest),
+  getOrganization: () => store.get('organizationId'),
+  onChange: snapshot => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('session-starter-status', snapshot);
+  },
+  onUsage: () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('refresh-usage');
+  }
+});
 
 // Single source of truth for "is there a recovery surface to bring the
 // window back via". Hiding/minimizing-to-tray is only ever safe when this
@@ -1217,7 +1233,13 @@ function createTray() {
       {
         label: 'Log Out',
         click: async () => {
+          try { await sessionStarter.disableForAccountChange(); }
+          catch (error) {
+            if (Notification.isSupported()) new Notification({ title: 'Could not pause session starter', body: error.message }).show();
+            return;
+          }
           store.delete('sessionKey');
+          store.delete('sessionKey_encrypted');
           store.delete('organizationId');
           // Clear all Claude.ai cookies and session storage
           const cookies = await session.defaultSession.cookies.get({ url: 'https://claude.ai' });
@@ -1476,6 +1498,9 @@ ipcMain.handle('get-credentials', () => {
 });
 
 ipcMain.handle('save-credentials', async (event, { sessionKey, organizationId }) => {
+  if (store.get('organizationId') && organizationId !== store.get('organizationId')) {
+    await sessionStarter.disableForAccountChange();
+  }
   // Store session key in OS keychain if available
   if (safeStorage.isEncryptionAvailable()) {
     const encrypted = safeStorage.encryptString(sessionKey);
@@ -1494,6 +1519,7 @@ ipcMain.handle('save-credentials', async (event, { sessionKey, organizationId })
 });
 
 ipcMain.handle('delete-credentials', async () => {
+  await sessionStarter.disableForAccountChange();
   store.delete('sessionKey');
   store.delete('sessionKey_encrypted');
   store.delete('organizationId');
@@ -1670,6 +1696,11 @@ ipcMain.on('set-compact-mode', (event, compact) => {
 });
 
 // Settings handlers
+ipcMain.handle('get-session-starter', () => sessionStarter.refreshCloud());
+ipcMain.handle('save-session-starter', async (event, config) => {
+  try { return { success: true, snapshot: await sessionStarter.save(config) }; }
+  catch (error) { return { success: false, error: error.message, snapshot: sessionStarter.snapshot() }; }
+});
 ipcMain.handle('get-settings', () => {
   return {
     autoStart: store.get('settings.autoStart', false),
@@ -2288,6 +2319,8 @@ app.whenReady().then(async () => {
   pruneStaleHistoryKeys();
 
   createMainWindow();
+  sessionStarter.start();
+  powerMonitor.on('resume', () => sessionStarter.tick().catch(() => {}));
   // Avoid creating temporary tray icons during startup when tray stats are disabled.
   if (store.get('settings.showTrayStats', false)) {
     createTray();
@@ -2398,6 +2431,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true;
   logger.log('App quitting');
+
+  sessionStarter.stop();
 });
 
 app.on('activate', () => {
