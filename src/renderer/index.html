@@ -250,10 +250,6 @@
                         <button class="done-settings-btn" id="closeSettingsBtn" title="Save">Save</button>
                     </div>
 
-                    <div class="settings-disclaimer">
-                        Unofficial tool — not affiliated with Anthropic.
-                    </div>
-
                     <div class="settings-rows">
                         <!-- Row 1: two toggles -->
                         <div class="settings-row-2col">
@@ -398,6 +394,19 @@
                             </div>
                         </div>
 
+                    <section class="session-starter" aria-label="Scheduled session start">
+                        <div class="starter-controls">
+                            <label class="starter-enable"><input type="checkbox" id="sessionStartEnabled"> Start session at</label>
+                            <input type="time" id="sessionStartTime" value="06:00" step="60" aria-label="Session start time" class="settings-select">
+                            <fieldset class="starter-modes" aria-label="Session start location">
+                                <label><input type="radio" name="sessionStartMode" value="local" checked><span>Local</span></label>
+                                <label><input type="radio" name="sessionStartMode" value="cloud"><span>Cloud</span></label>
+                            </fieldset>
+                            <button type="button" id="sessionStartInfo" class="starter-info" aria-label="About scheduled session start">ⓘ</button>
+                        </div>
+                        <div id="sessionStartStatus" class="starter-status error" role="alert" hidden></div>
+                        <button type="button" id="sessionStartManage" class="starter-manage" hidden>Manage cloud routine in Claude ↗</button>
+                    </section>
                     </div>
 
                     <div class="settings-footer">

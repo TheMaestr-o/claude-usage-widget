@@ -11,6 +11,7 @@ This file is tracked in the repo and visible to everyone.
 
 | Branch | Description |
 |--------|-------------|
+| `codex/scheduled-session-start` | Optional daily Haiku session start, locally or through a Claude cloud Routine, with compact settings and hover help. |
 | `feature/date-format-dmy` | Add Day-Month date format options to the Weekly Resets column dropdown (Discussion #116) — see full writeup below |
 | `chore/backout-taskbar-dual-window` | Revert the per-percentage Windows taskbar icons feature (Discussion #32 / PR #115) after recurring, unresolved taskbar-icon identity corruption on long-running sessions; close/quit hardening and dynamic settings-panel sizing from that work are kept — see full writeup below |
 | `feature/taskbar-single-icon` | Reintroduce taskbar stats as a single split-panel icon on the main window's own taskbar button — no second window, no *extra* per-window AppUserModelID (mainWindow's existing baseline AUMID is unaffected either way) — adapted directly from bastionecho's PR #115 — see full writeup below |
@@ -31,6 +32,19 @@ This file is tracked in the repo and visible to everyone.
 ---
 
 ## Changes
+
+### Scheduled session start
+
+Choose **Start session at** in Settings to send a tiny Haiku 4.5 prompt at a chosen daily time. The feature is off by default, with 06:00 as the initial time, and uses a small amount of your existing Claude allowance. Click **Save** to apply changes.
+
+- **Local:** requires the computer awake and online with the widget running. Existing active sessions and starts missed by more than five minutes are skipped. At most one attempt is made per day; ambiguous failures are not retried automatically.
+- **Cloud:** creates a Claude Routine that runs even when the widget is closed or the computer is asleep. Changing the time updates the routine. Disabling the feature or switching to Local pauses it. Requires Claude Routines access and an internet connection to apply changes.
+- Cloud schedules are saved in UTC. Save the intended local time again after a daylight-saving or timezone change. Runs may start a few minutes late.
+- Settings now place the session controls below Date format, use a shorter time picker, and show requirements only in the info icon's hover tooltip. Haiku is fixed; normal debug/status text and the affiliation banner are removed. Actionable errors remain visible.
+- Fixed the scheduled request locale to an accepted Claude value so UK English systems do not receive HTTP 400.
+
+**Validation:** 21 automated scheduler/API-adapter tests; user-confirmed local session start; cloud routine creation, successful scheduled execution, and deactivation confirmed on Windows. Packaged macOS/Linux validation is still pending. This feature does not increase weekly usage limits or guarantee an exact reset time.
+
 
 - **Day-Month date format options (Discussion #116):** @austempest reported the Weekly Resets column only offered US-style Month-Day formats (`Mar 13`), which doesn't match how most of the world writes dates. Added three parallel Day-Month options — `13 Mar`, `Fri 13 Mar`, `Fri 13 Mar + time` — as a second `optgroup` in the same dropdown, directly below the existing Month-Day group. `formatResetsAt()` gained matching `date-dmy` / `date-day-dmy` / `date-day-time-dmy` branches; no other logic changed since settings load/save already reads the dropdown value generically. Tested locally on Windows.
 

@@ -160,8 +160,16 @@ function populateOrgSelector(organizations, selectedOrgId) {
 async function handleOrgChange() {
     const newOrgId = elements.orgSelector.value;
     if (newOrgId && newOrgId !== credentials.organizationId) {
+        try { await window.electronAPI.saveCredentials({ ...credentials, organizationId: newOrgId }); }
+        catch (error) {
+            elements.orgSelector.value = credentials.organizationId;
+            document.getElementById('sessionStartStatus').hidden = false;
+            document.getElementById('sessionStartStatus').textContent = error.message;
+            resizeSettingsPanel();
+            return;
+        }
         credentials.organizationId = newOrgId;
-        await window.electronAPI.saveCredentials(credentials);
+        await loadSessionStarterSettings();
         // Refresh usage data with new org
         await fetchUsageData();
     }
@@ -323,7 +331,24 @@ function setupEventListeners() {
 
     // Settings close
     elements.closeSettingsBtn.addEventListener('click', async () => {
-        await saveSettings();
+        if (elements.closeSettingsBtn.disabled) return;
+        elements.closeSettingsBtn.disabled = true;
+        elements.closeSettingsBtn.textContent = 'Saving…';
+        document.querySelectorAll('.session-starter input, .session-starter select').forEach(input => { input.disabled = true; });
+        try {
+            await saveSessionStarterSettings();
+            await saveSettings();
+        } catch (error) {
+            document.getElementById('sessionStartStatus').hidden = false;
+            document.getElementById('sessionStartStatus').textContent = error.message;
+            document.getElementById('sessionStartStatus').classList.add('error');
+            resizeSettingsPanel();
+            return;
+        } finally {
+            elements.closeSettingsBtn.disabled = false;
+            elements.closeSettingsBtn.textContent = 'Save';
+            document.querySelectorAll('.session-starter input, .session-starter select').forEach(input => { input.disabled = false; });
+        }
         elements.settingsOverlay.style.display = 'none';
         if (_settingsOpenedFromCompact) {
             _settingsOpenedFromCompact = false;
@@ -339,7 +364,14 @@ function setupEventListeners() {
     });
 
     elements.logoutBtn.addEventListener('click', async () => {
-        await window.electronAPI.deleteCredentials();
+        try { await window.electronAPI.deleteCredentials(); }
+        catch (error) {
+            document.getElementById('sessionStartStatus').hidden = false;
+            document.getElementById('sessionStartStatus').textContent = `Could not log out: ${error.message}`;
+            document.getElementById('sessionStartStatus').classList.add('error');
+            resizeSettingsPanel();
+            return;
+        }
         credentials = { sessionKey: null, organizationId: null };
         elements.settingsOverlay.style.display = 'none';
         showLoginRequired();
@@ -448,7 +480,7 @@ function setupEventListeners() {
         }
         await loadSettings();
         elements.settingsOverlay.style.display = 'flex';
-        window.electronAPI.resizeWindow(measureSettingsHeight());
+        resizeSettingsPanel();
     });
 
     // Close compact settings — apply compact toggle value then close
@@ -907,6 +939,11 @@ const BANNER_HEIGHT = 28;
 const EXPAND_OVERHEAD = 28; // margin-top(12) + padding-top(6) + bottom buffer(10)
 
 function resizeWidget(bannerVisible) {
+    // A scheduled ping can refresh usage while Settings is open.
+    if (elements.settingsOverlay.style.display !== 'none') {
+        resizeSettingsPanel();
+        return;
+    }
     const hasBanner = bannerVisible !== undefined
         ? bannerVisible
         : elements.updateBanner.style.display !== 'none';
@@ -1979,8 +2016,66 @@ function applyTrayTaskbarRules(source) {
     }
 }
 
+let starterSnapshot = null;
+let starterListenersReady = false;
+function starterConfigFromUI() {
+    return {
+        enabled: document.getElementById('sessionStartEnabled').checked,
+        time: document.getElementById('sessionStartTime').value,
+        mode: document.querySelector('input[name="sessionStartMode"]:checked').value,
+        model: 'claude-haiku-4-5-20251001'
+    };
+}
+function resizeSettingsPanel() {
+    if (elements.settingsOverlay.style.display === 'none') return;
+    window.electronAPI.resizeWindow(measureSettingsHeight());
+}
+function updateStarterDetails() {
+    const config = starterConfigFromUI();
+    const help = config.mode === 'local'
+        ? 'Sends a small Haiku prompt daily at the selected local time to start an inactive five-hour session. Requires this computer awake and online, the widget running, and a valid Claude login. Existing windows and starts missed by more than five minutes are skipped. Uses a small amount of your allowance. Click Save to save.'
+        : 'Runs a small Haiku prompt daily on Anthropic’s servers, even when the computer is asleep or the widget is closed. Uses your Claude allowance and may run a few minutes late. The time is converted to UTC when saved: save again after daylight-saving or timezone changes. Closing or uninstalling the widget does not cancel the routine. Disable here while online, or manage it in Claude.';
+    document.getElementById('sessionStartInfo').title = help;
+    resizeSettingsPanel();
+}
+function renderStarterStatus(snapshot) {
+    starterSnapshot = snapshot;
+    const status = document.getElementById('sessionStartStatus');
+    const failed = /could not|stopped:|blocked/i.test(snapshot.status);
+    status.textContent = failed ? snapshot.status : '';
+    status.hidden = !failed;
+    document.getElementById('sessionStartManage').hidden = !snapshot.routineId;
+    resizeSettingsPanel();
+}
+async function loadSessionStarterSettings() {
+    const snapshot = await window.electronAPI.getSessionStarter();
+    document.getElementById('sessionStartEnabled').checked = snapshot.config.enabled;
+    document.getElementById('sessionStartTime').value = snapshot.config.time;
+    document.querySelector(`input[name="sessionStartMode"][value="${snapshot.config.mode}"]`).checked = true;
+    if (!starterListenersReady) {
+        starterListenersReady = true;
+        for (const input of document.querySelectorAll('.session-starter input, .session-starter select')) {
+            input.addEventListener('change', updateStarterDetails);
+        }
+        document.getElementById('sessionStartManage').addEventListener('click', () => {
+            if (starterSnapshot?.routineId) window.electronAPI.openExternal(`https://claude.ai/code/routines/${encodeURIComponent(starterSnapshot.routineId)}`);
+        });
+        window.electronAPI.onSessionStarterStatus(renderStarterStatus);
+    }
+    renderStarterStatus(snapshot);
+    updateStarterDetails();
+}
+async function saveSessionStarterSettings() {
+    const time = document.getElementById('sessionStartTime');
+    if (!time.value || !time.checkValidity()) throw new Error('Choose a valid session start time.');
+    const result = await window.electronAPI.saveSessionStarter(starterConfigFromUI());
+    if (result.snapshot) renderStarterStatus(result.snapshot);
+    if (!result.success) throw new Error(result.error);
+}
+
 async function loadSettings() {
     const settings = await window.electronAPI.getSettings();
+    await loadSessionStarterSettings();
     const isLinux = window.electronAPI.platform === 'linux';
     const isPortable = window.electronAPI.isPortable;
     const autoStartUnsupported = isLinux || isPortable;
