@@ -328,16 +328,31 @@ function setupEventListeners() {
         markPicker(elements.trayStylePicker, 'trayStyle', trayStyle);
         pushTrayImage(true);
     });
+    // Rings and statistics sit under the sheet, so a pick saves and closes it at once —
+    // the choice is on screen right away (statistics opens its panel if it was closed)
+    const showPick = () => setTimeout(() => elements.closeSettingsBtn.click(), 180);
     elements.gaugeStylePicker.addEventListener('click', (event) => {
         const btn = event.target.closest('[data-gauge-style]');
-        if (btn) applyGaugeStyle(btn.dataset.gaugeStyle);
+        if (!btn) return;
+        applyGaugeStyle(btn.dataset.gaugeStyle);
+        showPick();
     });
     elements.statsStylePicker.addEventListener('click', (event) => {
         const btn = event.target.closest('[data-stats-style]');
         if (!btn) return;
         statsStyle = btn.dataset.statsStyle;
         markPicker(elements.statsStylePicker, 'statsStyle', statsStyle);
-        if (graphVisible) renderStats();
+        if (!graphVisible) {
+            graphVisible = true;
+            elements.graphBtn.classList.add('active');
+            elements.graphSection.style.display = 'block';
+            loadChart();
+            _saveViewState();
+        } else renderStats();
+        showPick();
+    });
+    document.getElementById('maestroLink').addEventListener('click', () => {
+        window.electronAPI.openExternal('https://github.com/TheMaestr-o');
     });
 
     elements.graphBtn.addEventListener('click', async () => {
@@ -2934,12 +2949,8 @@ function settingsSheetHeight() {
     const header = content.querySelector('.settings-header');
     const body = content.querySelector('.settings-body');
     const footer = content.querySelector('.settings-footer');
-    const cs = getComputedStyle(body);
-    const shown = [...body.children].filter((child) => child.offsetParent !== null || getComputedStyle(child).display !== 'none');
-    let height = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    shown.forEach((child) => { height += child.getBoundingClientRect().height; });
-    height += (parseFloat(cs.rowGap) || 0) * Math.max(0, shown.length - 1);
-    return Math.ceil(header.getBoundingClientRect().height + height + footer.getBoundingClientRect().height);
+    // scrollHeight is the full content even while the window is still small
+    return Math.ceil(header.getBoundingClientRect().height + body.scrollHeight + footer.getBoundingClientRect().height);
 }
 
 // Settings management

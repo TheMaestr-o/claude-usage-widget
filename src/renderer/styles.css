@@ -3363,3 +3363,30 @@ body:not(.glass-off) .compact-content.sweeping .compact-bar-bg::after {
         animation: none !important;
     }
 }
+
+/* Groups keep their full height; the sheet grows to fit them instead */
+.settings-body > * {
+    flex-shrink: 0;
+}
+
+/* Owner's mark, set like the Maestro Studio logo: bold sans with an italic serif accent */
+body:not(.glass-off) .maestro-logo {
+    margin-left: 6px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--ink);
+    font: 700 13px -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: -0.02em;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+body:not(.glass-off) .maestro-logo i {
+    font-family: ui-serif, 'New York', Georgia, serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 14px;
+    letter-spacing: 0;
+}
+body:not(.glass-off) .maestro-logo:hover { opacity: 0.7; }
+body:not(.glass-off) .maestro-logo::before { content: '· '; font-weight: 400; color: var(--ink-3); }
