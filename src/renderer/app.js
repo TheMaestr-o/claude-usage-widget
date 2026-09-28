@@ -2,6 +2,7 @@
 let credentials = null;
 let updateInterval = null;
 let countdownInterval = null;
+let tickInterval = null; // главные отсчёты тикают каждую секунду
 let latestUsageData = null;
 let isExpanded = false;
 let isCompactMode = false;
@@ -13,7 +14,7 @@ let graphWasVisible = false; // preserves graph state across compact mode toggle
 let appInitializing = true;  // suppresses _saveViewState during startup restore
 let isFetching = false;       // in-flight guard — prevents overlapping fetchUsageData calls
 const UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes
-const WIDGET_HEIGHT_COLLAPSED = 155;
+const WIDGET_HEIGHT_COLLAPSED = 184; // два кольца по 96 px; в main.js — то же число
 const WIDGET_ROW_HEIGHT = 30;
 const GRAPH_HEIGHT = 232;
 
@@ -141,7 +142,7 @@ function populateOrgSelector(organizations, selectedOrgId) {
         organizations.forEach(org => {
             const option = document.createElement('option');
             option.value = org.id;
-            option.textContent = `${org.name}${org.isTeam ? ' (Team)' : ' (Personal)'}`;
+            option.textContent = `${org.name}${org.isTeam ? ' (команда)' : ' (личный)'}`;
             if (org.id === selectedOrgId) {
                 option.selected = true;
             }
@@ -169,12 +170,16 @@ async function init() {
     setupEventListeners();
     credentials = await window.electronAPI.getCredentials();
 
+    // macOS: окно — системное стекло (vibrancy в main.js); форму и скругления задаёт сама
+    // система, поэтому свои скругления и кромку не рисуем — иначе углы разошлись бы
+    if (window.electronAPI.platform === 'darwin') document.body.classList.add('vibrant');
+
     // Apply saved theme and load thresholds immediately
     const settings = await window.electronAPI.getSettings();
     window._cachedSettings = settings;
     applyTheme(settings.theme);
     if (window.electronAPI.platform === 'darwin') {
-        document.getElementById('trayLabel').textContent = 'Hide from Dock';
+        document.getElementById('trayLabel').textContent = 'Скрыть из Dock';
     }
     warnThreshold = settings.warnThreshold;
     dangerThreshold = settings.dangerThreshold;
@@ -224,7 +229,7 @@ async function init() {
     // Populate version label then check for updates after a short delay
     const version = await window.electronAPI.getAppVersion();
     if (elements.settingsVersionLabel) {
-        elements.settingsVersionLabel.textContent = `Application Version: v${version}`;
+        elements.settingsVersionLabel.textContent = `Версия ${version}`;
     }
     setTimeout(checkForUpdate, 2000);
     // Also check once every 24 hours for users who never close the app
@@ -469,7 +474,7 @@ function setupEventListeners() {
 async function handleConnect() {
     const sessionKey = elements.sessionKeyInput.value.trim();
     if (!sessionKey) {
-        elements.sessionKeyError.textContent = 'Please paste your session key';
+        elements.sessionKeyError.textContent = 'Вставьте ключ сессии';
         return;
     }
 
@@ -492,10 +497,10 @@ async function handleConnect() {
             await fetchUsageData();
             startAutoUpdate();
         } else {
-            elements.sessionKeyError.textContent = result.error || 'Invalid session key';
+            elements.sessionKeyError.textContent = result.error || 'Неверный ключ сессии';
         }
     } catch (error) {
-        elements.sessionKeyError.textContent = 'Connection failed. Check your key.';
+        elements.sessionKeyError.textContent = 'Не удалось подключиться — проверьте ключ.';
     } finally {
         elements.connectBtn.disabled = false;
         elements.connectBtn.textContent = 'Connect';
@@ -511,7 +516,7 @@ async function handleAutoDetect() {
     try {
         const result = await window.electronAPI.detectSessionKey();
         if (!result.success) {
-            elements.autoDetectError.textContent = result.error || 'Login failed';
+            elements.autoDetectError.textContent = result.error || 'Войти не удалось';
             return;
         }
 
@@ -532,10 +537,10 @@ async function handleAutoDetect() {
             startAutoUpdate();
         } else {
             elements.autoDetectError.textContent =
-                'Session invalid. Try again or use Manual →';
+                'Вход не подтвердился. Попробуйте ещё раз или «Вручную →»';
         }
     } catch (error) {
-        elements.autoDetectError.textContent = error.message || 'Login failed';
+        elements.autoDetectError.textContent = error.message || 'Войти не удалось';
     } finally {
         elements.autoDetectBtn.disabled = false;
         elements.autoDetectBtn.textContent = 'Log in';
@@ -590,13 +595,13 @@ function formatCurrency(amountCents, currencyCode) {
 
 // Extra row label mapping for API fields
 const EXTRA_ROW_CONFIG = {
-    seven_day_sonnet: { label: 'Sonnet (7d)', color: 'sonnet' },
-    seven_day_opus: { label: 'Opus (7d)', color: 'opus' },
-    seven_day_fable: { label: 'Fable (7d)', color: 'fable' },
-    seven_day_cowork: { label: 'Cowork (7d)', color: 'cowork' },
-    seven_day_omelette: { label: 'Design (7d)', color: 'design' },
-    seven_day_oauth_apps: { label: 'OAuth Apps (7d)', color: 'oauth' },
-    extra_usage: { label: 'Extra Usage', color: 'extra' },
+    seven_day_sonnet: { label: 'Sonnet · неделя', color: 'sonnet' },
+    seven_day_opus: { label: 'Opus · неделя', color: 'opus' },
+    seven_day_fable: { label: 'Fable · неделя', color: 'fable' },
+    seven_day_cowork: { label: 'Cowork · неделя', color: 'cowork' },
+    seven_day_omelette: { label: 'Design · неделя', color: 'design' },
+    seven_day_oauth_apps: { label: 'Приложения · неделя', color: 'oauth' },
+    extra_usage: { label: 'Сверх лимита', color: 'extra' },
 };
 
 // Expiry warning thresholds for the credits row (days until next_expires_at)
@@ -617,10 +622,10 @@ function buildCreditsRow(value) {
     if (value.is_enabled === true || value.is_enabled === false) {
         const spacer = document.createElement('span');
         spacer.className = 'extra-status badge-spacer';
-        spacer.textContent = value.is_enabled ? 'ON' : 'OFF';
+        spacer.textContent = value.is_enabled ? 'ВКЛ' : 'ВЫКЛ';
         label.appendChild(spacer);
     }
-    label.appendChild(document.createTextNode(' Credits'));
+    label.appendChild(document.createTextNode(' Кредиты'));
     row.appendChild(label);
 
     const amount = document.createElement('span');
@@ -631,7 +636,7 @@ function buildCreditsRow(value) {
     if (typeof value.paid_cents === 'number' && value.paid_cents > 0) {
         const split = document.createElement('span');
         split.className = 'credits-split';
-        split.textContent = `promo ${formatCurrency(value.promo_cents || 0, value.currency)} / paid ${formatCurrency(value.paid_cents, value.currency)}`;
+        split.textContent = `бонус ${formatCurrency(value.promo_cents || 0, value.currency)} / оплачено ${formatCurrency(value.paid_cents, value.currency)}`;
         row.appendChild(split);
     }
 
@@ -641,10 +646,10 @@ function buildCreditsRow(value) {
             const chip = document.createElement('span');
             chip.className = 'credits-chip' + (daysLeft <= CREDIT_EXPIRY_DANGER_DAYS ? ' danger' : '');
             const when = daysLeft <= CREDIT_EXPIRY_DANGER_DAYS
-                ? `in ${daysLeft}d`
+                ? `через ${daysLeft} д`
                 : new Date(value.next_expires_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-            chip.textContent = `${formatCurrency(value.next_expiry_cents, value.currency)} expires ${when}`;
-            chip.title = `Expires ${new Date(value.next_expires_at).toLocaleDateString()}`;
+            chip.textContent = `${formatCurrency(value.next_expiry_cents, value.currency)} сгорит ${when}`;
+            chip.title = `Сгорит ${new Date(value.next_expires_at).toLocaleDateString('ru-RU')}`;
             row.appendChild(chip);
         }
     }
@@ -694,15 +699,15 @@ function buildExtraRows(data) {
             if (value.is_enabled === true) {
                 const statusTag = document.createElement('span');
                 statusTag.className = 'extra-status on';
-                statusTag.textContent = 'ON';
+                statusTag.textContent = 'ВКЛ';
                 label.appendChild(statusTag);
             } else if (value.is_enabled === false) {
                 const statusTag = document.createElement('span');
                 statusTag.className = 'extra-status off';
-                statusTag.textContent = 'OFF';
+                statusTag.textContent = 'ВЫКЛ';
                 label.appendChild(statusTag);
             }
-            label.appendChild(document.createTextNode(' Monthly Spend'));
+            label.appendChild(document.createTextNode(' Расходы за месяц'));
         } else {
             label.textContent = config.label;
         }
@@ -737,7 +742,7 @@ function buildExtraRows(data) {
                 spendText.className = 'usage-percentage extra-spending spend-cap-text';
                 let limitStr = formatCurrency(value.limit_cents, value.currency);
                 if (value.limit_cents % 100 === 0) limitStr = limitStr.replace('.00', '');
-                spendText.textContent = `${formatCurrency(value.used_cents, value.currency)}/${limitStr} cap`;
+                spendText.textContent = `${formatCurrency(value.used_cents, value.currency)} из ${limitStr}`;
             } else {
                 spendText.className = 'usage-percentage spend-cap-text';
                 spendText.textContent = `${Math.round(utilization)}%`;
@@ -882,7 +887,7 @@ function normalizeUsageData(data) {
         if (EXTRA_ROW_CONFIG[key]) continue; // already known (e.g. seven_day_fable)
         const extraUsage = EXTRA_ROW_CONFIG.extra_usage;
         delete EXTRA_ROW_CONFIG.extra_usage;
-        EXTRA_ROW_CONFIG[key] = { label: `${displayName} (7d)`, color: 'scoped' };
+        EXTRA_ROW_CONFIG[key] = { label: `${displayName} · неделя`, color: 'scoped' };
         EXTRA_ROW_CONFIG.extra_usage = extraUsage;
     }
     return data;
@@ -939,15 +944,15 @@ function checkUsageAlerts(data) {
         alertFired.session_danger = true;
         alertFired.session_warn = true; // suppress warn if we jumped straight to danger
         window.electronAPI.showNotification(
-            'Claude Usage Widget',
-            `Current Session usage is at ${Math.round(sessionPct)}% — usage is extremely low`
+            'Лимиты Claude',
+            `Сессия: ${Math.round(sessionPct)}% — лимит почти исчерпан`
         );
     // Current Session — warn threshold
     } else if (sessionPct >= warnThreshold && sessionPct < 100 && !alertFired.session_warn) {
         alertFired.session_warn = true;
         window.electronAPI.showNotification(
-            'Claude Usage Widget',
-            `Current Session usage is at ${Math.round(sessionPct)}% — usage is low`
+            'Лимиты Claude',
+            `Сессия: ${Math.round(sessionPct)}% — лимит подходит к концу`
         );
     }
 
@@ -957,15 +962,15 @@ function checkUsageAlerts(data) {
         alertFired.weekly_danger = true;
         alertFired.weekly_warn = true;
         window.electronAPI.showNotification(
-            'Claude Usage Widget',
-            `Weekly Limit usage is at ${Math.round(weeklyPct)}% — usage is extremely low`
+            'Лимиты Claude',
+            `Неделя: ${Math.round(weeklyPct)}% — лимит почти исчерпан`
         );
     // Weekly Limit — warn threshold
     } else if (weeklyPct >= warnThreshold && weeklyPct < 100 && !alertFired.weekly_warn) {
         alertFired.weekly_warn = true;
         window.electronAPI.showNotification(
-            'Claude Usage Widget',
-            `Weekly Limit usage is at ${Math.round(weeklyPct)}% — usage is low`
+            'Лимиты Claude',
+            `Неделя: ${Math.round(weeklyPct)}% — лимит подходит к концу`
         );
     }
 
@@ -979,23 +984,23 @@ function checkUsageAlerts(data) {
         alertFired.blocked = true;
         if (weeklyPct >= 100) {
             window.electronAPI.showNotification(
-                'Weekly limit reached.',
+                'Недельный лимит исчерпан',
                 // Build date and time as separate pieces and join with "at" — formatResetsAt's
                 // combined date-day-time mode concatenates them with no connector, which read
                 // run-on. Independent of dashboard's weeklyDateFormat setting on purpose.
-                `Usage resets on ${formatResetsAt(data.seven_day?.resets_at, true, settings.timeFormat || '12h', 'date-day')} at ${formatResetsAt(data.seven_day?.resets_at, false, settings.timeFormat || '12h', 'date-day')}.`
+                `Обновится ${formatResetsAt(data.seven_day?.resets_at, true, settings.timeFormat || '24h', 'date-day')} в ${formatResetsAt(data.seven_day?.resets_at, false, settings.timeFormat || '24h', 'date-day')}.`
             );
         } else {
             window.electronAPI.showNotification(
-                'Session limit reached.',
-                `Usage resets at ${formatResetsAt(data.five_hour?.resets_at, false, settings.timeFormat || '12h', settings.weeklyDateFormat || 'date')}.`
+                'Лимит сессии исчерпан',
+                `Обновится в ${formatResetsAt(data.five_hour?.resets_at, false, settings.timeFormat || '24h', settings.weeklyDateFormat || 'date')}.`
             );
         }
     } else if (!isBlocked && alertFired.blocked) {
         alertFired.blocked = false;
         window.electronAPI.showNotification(
-            'Claude Usage Widget',
-            'Usage is available again.'
+            'Лимиты Claude',
+            'Claude снова доступен.'
         );
     }
 }
@@ -1062,7 +1067,14 @@ function applyCompactMode(compact) {
 }
 
 // Update the compact mode progress bars
+function placeCompactPercents() {
+    document.querySelectorAll('.compact-bar-bg > .compact-pct').forEach((pct) => {
+        pct.parentElement.parentElement.appendChild(pct);
+    });
+}
+
 function updateCompactBars(data) {
+    placeCompactPercents();
     const sessionPct = Math.min(Math.max(data.five_hour?.utilization || 0, 0), 100);
     const weeklyPct = Math.min(Math.max(data.seven_day?.utilization || 0, 0), 100);
 
@@ -1112,7 +1124,7 @@ function updateCompactBars(data) {
 function applyCompactSpendRow() {
     if (!elements.compactSpendToggle) return;
     elements.compactSpendArrow.classList.toggle('expanded', compactSpendOpen);
-    elements.compactSpendToggle.title = compactSpendOpen ? 'Hide spend' : 'Show spend';
+    elements.compactSpendToggle.title = compactSpendOpen ? 'Скрыть расходы' : 'Показать расходы';
     elements.compactSpendRow.style.display = compactSpendOpen ? '' : 'none';
 }
 // Persist compact mode setting without touching the rest of settings — debounced
@@ -1192,7 +1204,7 @@ function refreshTimers() {
     if (!latestUsageData) return;
 
     const settings = window._cachedSettings || {};
-    const timeFormat = settings.timeFormat || '12h';
+    const timeFormat = settings.timeFormat || '24h';
     const weeklyDateFormat = settings.weeklyDateFormat || 'date';
 
     // Session data
@@ -1227,7 +1239,7 @@ function refreshTimers() {
         sessionResetsAt,
         5 * 60 // 5 hours in minutes
     );
-    elements.sessionResetsAt.textContent = formatResetsAt(sessionResetsAt, false, timeFormat, weeklyDateFormat);
+    elements.sessionResetsAt.textContent = sessionResetsAt ? `обновится в ${formatResetsAt(sessionResetsAt, false, timeFormat, weeklyDateFormat)}` : '—';
     elements.sessionResetsAt.style.opacity = sessionResetsAt ? '1' : '0.4';
 
     // Weekly data
@@ -1261,7 +1273,7 @@ function refreshTimers() {
         weeklyResetsAt,
         7 * 24 * 60 // 7 days in minutes
     );
-    elements.weeklyResetsAt.textContent = formatResetsAt(weeklyResetsAt, true, timeFormat, weeklyDateFormat);
+    elements.weeklyResetsAt.textContent = weeklyResetsAt ? `обновится ${formatResetsAt(weeklyResetsAt, true, timeFormat, weeklyDateFormat)}` : '—';
     elements.weeklyResetsAt.style.opacity = weeklyResetsAt ? '1' : '0.4';
 }
 
@@ -1271,20 +1283,70 @@ function startCountdown() {
         refreshTimers();
         if (isExpanded) refreshExtraTimers();
     }, 30000);
+    if (tickInterval) clearInterval(tickInterval);
+    tickInterval = setInterval(tickCountdowns, 1000);
 }
 
-// Update progress bar
+// Главные отсчёты тикают каждую секунду; строки моделей — раз в 30 с, как и раньше
+function tickCountdowns() {
+    if (!latestUsageData || isCompactMode) return;
+    updateTimer(elements.sessionTimer, elements.sessionTimeText, latestUsageData.five_hour?.resets_at, 5 * 60);
+    updateTimer(elements.weeklyTimer, elements.weeklyTimeText, latestUsageData.seven_day?.resets_at, 7 * 24 * 60);
+}
+
+// Число плавно добегает до нового значения; при первом показе — от нуля
+function animatePercent(el, to) {
+    const from = el.dataset.v === undefined ? 0 : Number(el.dataset.v);
+    el.dataset.v = String(to);
+    const render = (v) => {
+        const n = String(Math.round(v));
+        if (el.classList.contains('gauge-num')) {
+            // Большое число и маленький знак процента рядом
+            const pct = document.createElement('span');
+            pct.className = 'gauge-pct';
+            pct.textContent = '%';
+            el.replaceChildren(document.createTextNode(n), pct);
+        } else {
+            el.textContent = `${n}%`;
+        }
+    };
+    if (el._raf) cancelAnimationFrame(el._raf);
+    if (from === to || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        render(to);
+        return;
+    }
+    const start = performance.now();
+    const duration = 900;
+    const step = (now) => {
+        const t = Math.min(1, (now - start) / duration);
+        render(from + (to - from) * (1 - Math.pow(1 - t, 3)));
+        el._raf = t < 1 ? requestAnimationFrame(step) : 0;
+    };
+    el._raf = requestAnimationFrame(step);
+}
+
+// Update progress bar — или кольцо: у дуги в data-c длина окружности
 function updateProgressBar(progressElement, percentageElement, value, isWeekly = false) {
     const percentage = Math.min(Math.max(value, 0), 100);
+    const circumference = Number(progressElement.dataset.c || 0);
 
-    progressElement.style.width = `${percentage}%`;
-    percentageElement.textContent = `${Math.round(percentage)}%`;
+    if (circumference) {
+        progressElement.style.strokeDashoffset = `${circumference * (1 - percentage / 100)}`;
+    } else {
+        progressElement.style.width = `${percentage}%`;
+    }
+    animatePercent(percentageElement, Math.round(percentage));
 
+    // Состояние всего кольца — для цвета и мягкого свечения у порогов
+    const gauge = progressElement.closest('.gauge');
     progressElement.classList.remove('warning', 'danger');
+    if (gauge) gauge.classList.remove('is-warning', 'is-danger');
     if (percentage >= dangerThreshold) {
         progressElement.classList.add('danger');
+        if (gauge) gauge.classList.add('is-danger');
     } else if (percentage >= warnThreshold) {
         progressElement.classList.add('warning');
+        if (gauge) gauge.classList.add('is-warning');
     }
 }
 
@@ -1294,8 +1356,8 @@ function updateProgressBar(progressElement, percentageElement, value, isWeekly =
 function formatResetsAt(resetsAt, isWeekly, timeFormat, weeklyDateFormat) {
     if (!resetsAt) return '—';
     const date = new Date(resetsAt);
-    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const days = ['вс','пн','вт','ср','чт','пт','сб'];
+    const months = ['янв.','февр.','мар.','апр.','мая','июн.','июл.','авг.','сент.','окт.','нояб.','дек.'];
 
     const formatTime = (d) => {
         if (timeFormat === '24h') {
@@ -1314,9 +1376,9 @@ function formatResetsAt(resetsAt, isWeekly, timeFormat, weeklyDateFormat) {
         const monthStr = months[date.getMonth()];
         const dayNum = date.getDate();
         const fmt = weeklyDateFormat || 'date';
-        if (fmt === 'date-day') return `${dayStr} ${monthStr} ${dayNum}`;
-        if (fmt === 'date-day-time') return `${dayStr} ${monthStr} ${dayNum} ${formatTime(date)}`;
-        return `${monthStr} ${dayNum}`; // default: 'date'
+        if (fmt === 'date-day') return `${dayStr}, ${dayNum} ${monthStr}`;
+        if (fmt === 'date-day-time') return `${dayStr}, ${dayNum} ${monthStr} ${formatTime(date)}`;
+        return `${dayNum} ${monthStr}`; // default: 'date'
     } else {
         return formatTime(date);
     }
@@ -1324,12 +1386,14 @@ function formatResetsAt(resetsAt, isWeekly, timeFormat, weeklyDateFormat) {
 
 // Update circular timer
 function updateTimer(timerElement, textElement, resetsAt, totalMinutes) {
+    const circumference = Number(timerElement.dataset?.c || 63);
+    const precise = Boolean(textElement.dataset?.precise);
     if (!resetsAt) {
-        textElement.textContent = 'Not started';
-        textElement.style.opacity = '0.4';
-        textElement.style.fontSize = '10px';
-        textElement.title = 'Starts when a message is sent';
-        timerElement.style.strokeDashoffset = 63;
+        textElement.textContent = 'Не начата';
+        textElement.style.opacity = '0.45';
+        textElement.style.fontSize = precise ? '' : '10px';
+        textElement.title = 'Начнётся с первого сообщения';
+        timerElement.style.strokeDashoffset = circumference;
         return;
     }
 
@@ -1343,34 +1407,19 @@ function updateTimer(timerElement, textElement, resetsAt, totalMinutes) {
     const diff = resetDate - now;
 
     if (diff <= 0) {
-        textElement.textContent = 'Resetting...';
+        textElement.textContent = 'Обновляется…';
         timerElement.style.strokeDashoffset = 0;
         return;
     }
 
-    // Calculate remaining time
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    // const seconds = Math.floor((diff % (1000 * 60)) / 1000); // Optional seconds
-
-    // Format time display
-    if (hours >= 24) {
-        const days = Math.floor(hours / 24);
-        const remainingHours = hours % 24;
-        textElement.textContent = `${days}d ${remainingHours}h`;
-    } else if (hours > 0) {
-        textElement.textContent = `${hours}h ${minutes}m`;
-    } else {
-        textElement.textContent = `${minutes}m`;
-    }
+    textElement.textContent = formatCountdown(diff, precise);
 
     // Calculate progress (elapsed percentage)
     const totalMs = totalMinutes * 60 * 1000;
     const elapsedMs = totalMs - diff;
     const elapsedPercentage = (elapsedMs / totalMs) * 100;
 
-    // Update circle (63 is ~2*pi*10)
-    const circumference = 63;
+    // Длина дуги — из data-c (у мини-кружков строк моделей её нет: 63 ≈ 2π·10)
     const offset = circumference - (elapsedPercentage / 100) * circumference;
     timerElement.style.strokeDashoffset = offset;
 
@@ -1383,6 +1432,22 @@ function updateTimer(timerElement, textElement, resetsAt, totalMinutes) {
     } else if (elapsedPercentage >= ELAPSED_AMBER_THRESHOLD) {
         timerElement.classList.add('elapsed-warn');
     }
+}
+
+// «1:47:12» — у главных колец (тикает каждую секунду); «4 ч 14 мин», «2 д 4 ч» — у остальных
+function formatCountdown(diff, precise) {
+    const totalSec = Math.floor(diff / 1000);
+    const days = Math.floor(totalSec / 86400);
+    const hours = Math.floor((totalSec % 86400) / 3600);
+    const minutes = Math.floor((totalSec % 3600) / 60);
+    const seconds = totalSec % 60;
+    if (days > 0) return `${days} д ${hours} ч`;
+    if (precise) {
+        const mm = String(minutes).padStart(2, '0');
+        const ss = String(seconds).padStart(2, '0');
+        return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
+    }
+    return hours > 0 ? `${hours} ч ${minutes} мин` : `${minutes} мин`;
 }
 
 // UI State Management
@@ -1491,9 +1556,9 @@ function renderChart(history) {
 
     const datasets = [
         {
-            label: 'Session',
+            label: 'Сессия',
             data: history.map((entry) => ({ x: entry.timestamp, y: entry.session })),
-            borderColor: '#8b5cf6',
+            borderColor: chartInk().session,
             backgroundColor: 'transparent',
             borderWidth: 2,
             stepped: true,
@@ -1502,9 +1567,9 @@ function renderChart(history) {
             pointHitRadius: 10
         },
         {
-            label: 'Weekly',
+            label: 'Неделя',
             data: history.map((entry) => ({ x: entry.timestamp, y: entry.weekly })),
-            borderColor: '#3b82f6',
+            borderColor: chartInk().weekly,
             backgroundColor: 'transparent',
             borderWidth: 2,
             stepped: true,
@@ -1520,7 +1585,7 @@ function renderChart(history) {
             datasets.push({
                 label: 'Sonnet',
                 data: history.map((entry) => ({ x: entry.timestamp, y: entry.sonnet || 0 })),
-                borderColor: '#f43f5e',
+                borderColor: chartInk().sonnet,
                 backgroundColor: 'transparent',
                 borderWidth: 2,
                 stepped: true,
@@ -1537,7 +1602,7 @@ function renderChart(history) {
             datasets.push({
                 label: 'Opus',
                 data: history.map((entry) => ({ x: entry.timestamp, y: entry.opus || 0 })),
-                borderColor: '#f59e0b',
+                borderColor: chartInk().opus,
                 backgroundColor: 'transparent',
                 borderWidth: 2,
                 stepped: true,
@@ -1554,7 +1619,7 @@ function renderChart(history) {
             datasets.push({
                 label: 'Fable',
                 data: history.map((entry) => ({ x: entry.timestamp, y: entry.fable || 0 })),
-                borderColor: '#d946ef',
+                borderColor: chartInk().fable,
                 backgroundColor: 'transparent',
                 borderWidth: 2,
                 stepped: true,
@@ -1571,7 +1636,7 @@ function renderChart(history) {
             datasets.push({
                 label: 'Cowork',
                 data: history.map((entry) => ({ x: entry.timestamp, y: entry.cowork || 0 })),
-                borderColor: '#06b6d4',
+                borderColor: chartInk().cowork,
                 backgroundColor: 'transparent',
                 borderWidth: 2,
                 stepped: true,
@@ -1588,7 +1653,7 @@ function renderChart(history) {
             datasets.push({
                 label: 'Design',
                 data: history.map((entry) => ({ x: entry.timestamp, y: entry.design || 0 })),
-                borderColor: '#92400e',
+                borderColor: chartInk().design,
                 backgroundColor: 'transparent',
                 borderWidth: 2,
                 stepped: true,
@@ -1605,7 +1670,7 @@ function renderChart(history) {
             datasets.push({
                 label: 'OAuth Apps',
                 data: history.map((entry) => ({ x: entry.timestamp, y: entry.oauthApps || 0 })),
-                borderColor: '#f97316',
+                borderColor: chartInk().oauth,
                 backgroundColor: 'transparent',
                 borderWidth: 2,
                 stepped: true,
@@ -1620,9 +1685,9 @@ function renderChart(history) {
         const extraUsageData = history.map((entry) => entry.extraUsage || 0);
         if (extraUsageData.some((value) => value > 0)) {
             datasets.push({
-            label: 'Extra Usage',
+            label: 'Сверх лимита',
             data: history.map((entry) => ({ x: entry.timestamp, y: entry.extraUsage || 0 })),
-            borderColor: '#f59e0b',
+            borderColor: chartInk().extra,
             backgroundColor: 'transparent',
             borderWidth: 2,
             stepped: true,
@@ -1669,7 +1734,7 @@ function renderChart(history) {
                             size: 10
                         },
                         callback(value) {
-                            const tf = (window._cachedSettings || {}).timeFormat || '12h';
+                            const tf = (window._cachedSettings || {}).timeFormat || '24h';
                             const spanMs = history.length > 1
                                 ? history[history.length - 1].timestamp - history[0].timestamp
                                 : 0;
@@ -1690,7 +1755,7 @@ function renderChart(history) {
                         callback: (value) => `${value}%`
                     },
                     grid: {
-                        color: 'rgba(255, 255, 255, 0.05)'
+                        color: chartInk().grid
                     }
                 }
             },
@@ -1701,7 +1766,7 @@ function renderChart(history) {
                 tooltip: {
                     callbacks: {
                         title(items) {
-                            return new Date(items[0].parsed.x).toLocaleString([], {
+                            return new Date(items[0].parsed.x).toLocaleString('ru-RU', {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: 'numeric',
@@ -1718,17 +1783,25 @@ function renderChart(history) {
     });
 }
 
+// Цвета графика под тему: в тёмной — светлые линии, в светлой — тёмные
+function chartInk() {
+    const light = document.body.classList.contains('theme-light');
+    const models = { fable: '#5fd4ae', sonnet: '#ff8fae', opus: '#f2c46d', cowork: '#62c8f5', design: '#c9a7ff', oauth: '#aab4c8', extra: '#ffb547' };
+    return light
+        ? { ...models, session: '#1d1d1f', weekly: '#5b6cff', grid: 'rgba(0, 0, 0, 0.06)', text: 'rgba(29, 29, 31, 0.55)' }
+        : { ...models, session: '#f5f7fa', weekly: '#9fb4ff', grid: 'rgba(255, 255, 255, 0.06)', text: 'rgba(245, 247, 250, 0.5)' };
+}
+
 function formatTimestampTick(timestamp, spanMs, timeFormat) {
     const date = new Date(timestamp);
-    const hour12 = (timeFormat || '12h') !== '24h';
+    const hour12 = (timeFormat || '24h') !== '24h';
 
-    if (spanMs < 12 * 60 * 60 * 1000) {
-        return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12 });
-    }
+    const time = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', hour12 });
+    if (spanMs < 12 * 60 * 60 * 1000) return time;
     if (spanMs < 48 * 60 * 60 * 1000) {
-        return date.toLocaleString([], { weekday: 'short', hour: 'numeric', hour12 });
+        return `${['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'][date.getDay()]} ${time}`;
     }
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString('ru-RU', { month: 'short', day: 'numeric' });
 }
 
 // Add spinning animation for refresh button
@@ -1791,7 +1864,7 @@ async function loadSettings() {
 
     applyTheme(settings.theme);
     if (window.electronAPI.platform === 'darwin') {
-        document.getElementById('trayLabel').textContent = 'Hide from Dock';
+        document.getElementById('trayLabel').textContent = 'Скрыть из Dock';
     }
 }
 
@@ -1829,7 +1902,7 @@ async function saveSettings() {
     window._cachedSettings = settings;
     applyTheme(settings.theme);
     if (window.electronAPI.platform === 'darwin') {
-        document.getElementById('trayLabel').textContent = 'Hide from Dock';
+        document.getElementById('trayLabel').textContent = 'Скрыть из Dock';
     }
 
     // Re-render resets-at values immediately with new format
@@ -1864,17 +1937,13 @@ async function checkForUpdate() {
         // so in compact mode re-assert compact bounds instead — main.js's
         // getCompactHeight() already accounts for the banner via
         // updateBannerVisible, set in the same check-for-update call above.
-        elements.updateBannerText.textContent = `▲  Version ${version} available — click to download`;
-        elements.updateBanner.style.display = 'flex';
-        if (isCompactMode) {
-            window.electronAPI.setCompactMode(true);
-        } else {
-            resizeWidget(true);
-        }
+        // Эта сборка — с новым дизайном; версия автора его бы заменила, поэтому
+        // вместо баннера над кольцами — тихая строка в настройках
+        debugLog(`Upstream version available: v${version}`);
 
         // Populate settings panel link if already visible
         if (elements.settingsUpdateLink) {
-            elements.settingsUpdateLink.textContent = `→ v${version} available`;
+            elements.settingsUpdateLink.textContent = `у автора есть ${version}`;
             elements.settingsUpdateLink.style.display = 'inline';
         }
 
@@ -1889,4 +1958,5 @@ init();
 window.addEventListener('beforeunload', () => {
     stopAutoUpdate();
     if (countdownInterval) clearInterval(countdownInterval);
+    if (tickInterval) clearInterval(tickInterval);
 });

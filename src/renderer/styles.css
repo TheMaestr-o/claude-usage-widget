@@ -1702,3 +1702,479 @@ body.theme-light .compact-pct {
 .progress-fill.pulse {
     animation: pulse-danger 1.2s ease-in-out infinite;
 }
+
+/* ==========================================================================
+   Лимиты Claude — стекло (апгрейд 2026-09)
+   Поверх исходных стилей: body:not(.glass-off) поднимает вес правил, чтобы
+   они побеждали и тёмную, и светлую тему автора, не трогая остальное.
+   ========================================================================== */
+
+body {
+    --glass-fill: rgba(24, 24, 28, 0.5);
+    --glass-edge: rgba(255, 255, 255, 0.14);
+    --glass-hi: rgba(255, 255, 255, 0.09);
+    --ink: #f5f7fa;
+    --ink-2: rgba(245, 247, 250, 0.64);
+    --ink-3: rgba(245, 247, 250, 0.4);
+    --track: rgba(255, 255, 255, 0.1);
+    --time: rgba(255, 255, 255, 0.46);
+    --session: #f5f7fa;
+    --weekly: #9fb4ff;
+    --warn: #ffb547;
+    --danger: #ff5a52;
+    --btn: rgba(255, 255, 255, 0.07);
+    --btn-hover: rgba(255, 255, 255, 0.15);
+    --radius: 18px;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+body.theme-light {
+    --glass-fill: rgba(250, 250, 252, 0.6);
+    --glass-edge: rgba(255, 255, 255, 0.75);
+    --glass-hi: rgba(255, 255, 255, 0.85);
+    --ink: #1d1d1f;
+    --ink-2: rgba(29, 29, 31, 0.62);
+    --ink-3: rgba(29, 29, 31, 0.42);
+    --track: rgba(0, 0, 0, 0.08);
+    --time: rgba(0, 0, 0, 0.36);
+    --session: #1d1d1f;
+    --weekly: #5b6cff;
+    --warn: #e08a00;
+    --danger: #e5352c;
+    --btn: rgba(0, 0, 0, 0.05);
+    --btn-hover: rgba(0, 0, 0, 0.1);
+}
+
+/* Окно: стекло поверх системного размытия, тонкая светлая кромка сверху */
+body:not(.glass-off) .widget-container {
+    background: var(--glass-fill);
+    border: 0.5px solid var(--glass-edge);
+    border-radius: var(--radius);
+    box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+
+body:not(.glass-off) .title-bar {
+    background: transparent;
+    border-bottom: none;
+    height: 40px;
+    padding: 12px 12px 0 16px;
+}
+
+body:not(.glass-off) .title {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    gap: 8px;
+}
+
+body:not(.glass-off) .app-logo {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    opacity: 1;
+}
+
+body:not(.glass-off) .controls {
+    gap: 6px;
+    margin-right: 0;
+}
+
+body:not(.glass-off) .control-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--btn);
+    color: var(--ink-2);
+    box-shadow: none;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+
+body:not(.glass-off) .control-btn:hover {
+    background: var(--btn-hover);
+    color: var(--ink);
+}
+
+body:not(.glass-off) .control-btn:active {
+    transform: scale(0.9);
+}
+
+body:not(.glass-off) .close-btn:hover {
+    background: #ff5f57;
+    color: #fff;
+}
+
+body:not(.glass-off) .graph-btn.active {
+    background: var(--btn-hover);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--glass-edge);
+}
+
+body:not(.glass-off) .content {
+    padding: 0 0 8px;
+}
+
+/* ---------- Два кольца ---------- */
+
+.gauges {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 10px 22px 8px 26px;
+}
+
+.gauge {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+}
+
+.gauge-ring {
+    position: relative;
+    width: 96px;
+    height: 96px;
+    flex: none;
+}
+
+.ring {
+    display: block;
+    transform: rotate(-90deg);
+    overflow: visible;
+}
+
+.ring circle {
+    fill: none;
+}
+
+.ring-track {
+    stroke: var(--track);
+    stroke-width: 8;
+}
+
+.ring-usage {
+    stroke: var(--session);
+    stroke-width: 8;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1.2s cubic-bezier(0.22, 0.9, 0.24, 1), stroke 0.6s ease;
+}
+
+.ring-usage.weekly {
+    stroke: var(--weekly);
+}
+
+.ring-usage.warning {
+    stroke: var(--warn);
+}
+
+.ring-usage.danger {
+    stroke: var(--danger);
+}
+
+.ring-time-track {
+    stroke: var(--track);
+    stroke-width: 2.5;
+    opacity: 0.55;
+}
+
+/* Время окна — всегда спокойное: конец окна — это не тревога, а скорый сброс */
+body:not(.glass-off) .ring-time,
+body:not(.glass-off) .ring-time.elapsed-warn,
+body:not(.glass-off) .ring-time.elapsed-soon {
+    stroke: var(--time);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s linear;
+}
+
+.gauge-value {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.gauge-num {
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    line-height: 1;
+    transition: color 0.6s ease;
+}
+
+.gauge-pct {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-2);
+    margin-left: 1px;
+}
+
+.gauge-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.gauge-label {
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+
+body:not(.glass-off) .gauge-countdown {
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    line-height: 1.15;
+    white-space: nowrap;
+    text-align: left;
+}
+
+body:not(.glass-off) .gauge-reset {
+    font-size: 11.5px;
+    color: var(--ink-3);
+    white-space: nowrap;
+    text-align: left;
+}
+
+/* У порогов — мягкое «дыхание» свечения, без мигания */
+.gauge.is-warning .ring-usage {
+    animation: glow-warn 2.8s ease-in-out infinite;
+}
+
+.gauge.is-danger .ring-usage {
+    animation: glow-danger 2.2s ease-in-out infinite;
+}
+
+.gauge.is-danger .gauge-num {
+    color: var(--danger);
+}
+
+@keyframes glow-warn {
+    0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 181, 71, 0.25)); }
+    50% { filter: drop-shadow(0 0 8px rgba(255, 181, 71, 0.65)); }
+}
+
+@keyframes glow-danger {
+    0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 90, 82, 0.3)); }
+    50% { filter: drop-shadow(0 0 9px rgba(255, 90, 82, 0.75)); }
+}
+
+/* ---------- Раскрытие, строки моделей, график ---------- */
+
+body:not(.glass-off) .expand-toggle {
+    height: 20px;
+    align-items: center;
+    padding: 0;
+}
+
+body:not(.glass-off) .expand-arrow {
+    color: var(--ink-3);
+    transition: transform 0.35s cubic-bezier(0.22, 0.9, 0.24, 1), color 0.2s ease;
+}
+
+body:not(.glass-off) .expand-toggle:hover .expand-arrow {
+    color: var(--ink);
+}
+
+body:not(.glass-off) .expand-section,
+body:not(.glass-off) .graph-section {
+    border-top: 0.5px solid var(--track);
+    animation: reveal 0.35s cubic-bezier(0.22, 0.9, 0.24, 1);
+}
+
+@keyframes reveal {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+}
+
+body:not(.glass-off) .usage-section {
+    padding: 0 22px 0 26px;
+}
+
+body:not(.glass-off) .usage-label,
+body:not(.glass-off) .expand-section .usage-label {
+    color: var(--ink-2);
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+body:not(.glass-off) .usage-percentage,
+body:not(.glass-off) .timer-text {
+    color: var(--ink);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+body:not(.glass-off) .resets-at-text {
+    color: var(--ink-3);
+}
+
+body:not(.glass-off) .progress-bar {
+    height: 5px;
+    background: var(--track);
+    border-radius: 3px;
+}
+
+body:not(.glass-off) .progress-fill,
+body:not(.glass-off) .progress-fill.weekly,
+body:not(.glass-off) .progress-fill.extra,
+body:not(.glass-off) .progress-fill.opus,
+body:not(.glass-off) .progress-fill.sonnet,
+body:not(.glass-off) .progress-fill.fable,
+body:not(.glass-off) .progress-fill.scoped,
+body:not(.glass-off) .progress-fill.cowork,
+body:not(.glass-off) .progress-fill.design,
+body:not(.glass-off) .progress-fill.oauth {
+    background: var(--weekly);
+    box-shadow: none;
+    transition: width 1s cubic-bezier(0.22, 0.9, 0.24, 1), background 0.6s ease;
+}
+
+body:not(.glass-off) .progress-fill.warning {
+    background: var(--warn);
+}
+
+body:not(.glass-off) .progress-fill.danger {
+    background: var(--danger);
+}
+
+body:not(.glass-off) .timer-bg {
+    stroke: var(--track);
+}
+
+body:not(.glass-off) .timer-progress {
+    stroke: var(--time);
+}
+
+/* ---------- Компактный вид ---------- */
+
+body:not(.glass-off) .compact-label {
+    color: var(--ink-2);
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+body:not(.glass-off) .compact-bar-bg {
+    background: var(--track);
+}
+
+body:not(.glass-off) .compact-bar-fill {
+    background: var(--session);
+    opacity: 0.9;
+    transition: width 1s cubic-bezier(0.22, 0.9, 0.24, 1), background 0.6s ease;
+}
+
+body:not(.glass-off) .compact-bar-fill.weekly,
+body:not(.glass-off) .compact-bar-fill.fable,
+body:not(.glass-off) .compact-bar-fill.spend {
+    background: var(--weekly);
+}
+
+body:not(.glass-off) .compact-bar-fill.warning {
+    background: var(--warn);
+}
+
+body:not(.glass-off) .compact-bar-fill.danger {
+    background: var(--danger);
+}
+
+body:not(.glass-off) .compact-pct {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+
+body:not(.glass-off) .compact-collapse-btn,
+body:not(.glass-off) .compact-expand-btn {
+    color: var(--ink-3);
+    background: transparent;
+}
+
+body:not(.glass-off) .compact-collapse-btn:hover,
+body:not(.glass-off) .compact-expand-btn:hover {
+    color: var(--ink);
+    background: var(--btn);
+}
+
+/* ---------- Настройки, вход ---------- */
+
+body:not(.glass-off) .settings-overlay {
+    background: var(--glass-fill);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+}
+
+body:not(.glass-off) .settings-title,
+body:not(.glass-off) .settings-row-label {
+    color: var(--ink);
+    font-family: inherit;
+}
+
+body:not(.glass-off) .settings-header {
+    background: transparent;
+    border-bottom: 0.5px solid var(--track);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ring-usage,
+    .ring-time,
+    .gauge.is-warning .ring-usage,
+    .gauge.is-danger .ring-usage,
+    .expand-section,
+    .graph-section {
+        animation: none !important;
+        transition: none !important;
+    }
+}
+
+/* Компактный вид: тонкая полоса и процент справа — не белым по белому */
+body:not(.glass-off) .compact-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+body:not(.glass-off) .compact-bar-bg {
+    height: 6px;
+    border-radius: 3px;
+    overflow: visible;
+    flex: 1;
+}
+
+body:not(.glass-off) .compact-bar-fill {
+    border-radius: 3px;
+}
+
+body:not(.glass-off) .compact-pct {
+    position: static;
+    transform: none;
+    order: 2;
+    width: 34px;
+    text-align: right;
+    font-size: 11px;
+    font-weight: 600;
+    text-shadow: none;
+}
+
+body:not(.glass-off) .compact-label {
+    font-size: 11px;
+    width: 58px;
+}
+
+/* macOS: окно — системное стекло; форму задаёт система, наша тонировка заполняет её целиком */
+body.vibrant:not(.glass-off) .widget-container {
+    border: none;
+    border-radius: 0;
+}

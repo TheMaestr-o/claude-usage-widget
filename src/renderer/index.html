@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 
 <head>
     <meta charset="UTF-8">
@@ -12,7 +12,7 @@
         img-src 'self' data:;
         connect-src 'none';
     ">
-    <title>Claude Usage Widget</title>
+    <title>Лимиты Claude</title>
     <link rel="stylesheet" href="styles.css">
     <script src="../../node_modules/chart.js/dist/chart.umd.js"></script>
 </head>
@@ -24,37 +24,46 @@
             <div class="title-bar" id="titleBar">
                 <div class="title">
                     <img src="../../assets/logo.png" alt="Logo" class="app-logo">
-                    <span>Claude Usage</span>
+                    <span>Лимиты Claude</span>
                 </div>
                 <div class="controls">
-                    <button class="control-btn settings-btn" id="settingsBtn" title="Settings">⚙️</button>
-                    <button class="control-btn refresh-btn" id="refreshBtn" title="Refresh">
+                    <button class="control-btn settings-btn" id="settingsBtn" title="Настройки" aria-label="Настройки">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3" />
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                        </svg>
+                    </button>
+                    <button class="control-btn refresh-btn" id="refreshBtn" title="Обновить" aria-label="Обновить">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <path d="M23 4v6h-6M1 20v-6h6" />
                             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
                         </svg>
                     </button>
-                    <button class="control-btn graph-btn" id="graphBtn" title="Toggle Usage Graph">
+                    <button class="control-btn graph-btn" id="graphBtn" title="График" aria-label="График">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                         </svg>
                     </button>
-                    <button class="control-btn minimize-btn" id="minimizeBtn" title="Minimise to System Tray">−</button>
-                    <button class="control-btn close-btn" id="closeBtn" title="Exit Application">×</button>
+                    <button class="control-btn minimize-btn" id="minimizeBtn" title="Свернуть" aria-label="Свернуть">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                    </button>
+                    <button class="control-btn close-btn" id="closeBtn" title="Закрыть" aria-label="Закрыть">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+                    </button>
                 </div>
             </div>
 
             <!-- Update Banner (hidden by default) -->
             <div class="update-banner" id="updateBanner" style="display: none;">
                 <span class="update-banner-text" id="updateBannerText"></span>
-                <button class="update-banner-dismiss" id="updateBannerDismiss" title="Dismiss">✕</button>
+                <button class="update-banner-dismiss" id="updateBannerDismiss" title="Скрыть" aria-label="Скрыть">✕</button>
             </div>
 
             <!-- Loading State -->
             <div class="loading-container" id="loadingContainer">
                 <div class="spinner"></div>
-                <p>Loading usage data...</p>
+                <p>Загружаю лимиты…</p>
             </div>
 
             <!-- Login -->
@@ -69,31 +78,31 @@
                             </svg>
                         </div>
                         <div class="step-text">
-                            <h3>Connect to Claude.ai</h3>
-                            <p>Log in to your Claude account</p>
-                            <p class="step-hint">If auto-login doesn't work, use Manual to paste your session key — Claude.ai may block embedded browsers.</p>
+                            <h3>Подключите Claude.ai</h3>
+                            <p>Войдите в свой аккаунт Claude</p>
+                            <p class="step-hint">Если вход не открылся — нажмите «Вручную» и вставьте ключ сессии: Claude.ai иногда не пускает встроенные браузеры.</p>
                             <p class="step-error" id="autoDetectError"></p>
                         </div>
-                        <button class="auto-detect-btn" id="autoDetectBtn">Log in</button>
-                        <button class="next-step-btn" id="nextStepBtn">Manual →</button>
+                        <button class="auto-detect-btn" id="autoDetectBtn">Войти</button>
+                        <button class="next-step-btn" id="nextStepBtn">Вручную →</button>
                     </div>
 
                     <div class="login-step2" id="loginStep2" style="display: none;">
                         <div class="session-key-form">
                             <div class="session-key-header">
-                                <h3>Paste your Session Key</h3>
+                                <h3>Вставьте ключ сессии</h3>
                                 <p>
-                                    <a href="#" id="openBrowserLink" class="open-browser-link">Open claude.ai</a>
-                                    → <code>F12</code> → Application → Cookies → <code>sessionKey</code>
+                                    <a href="#" id="openBrowserLink" class="open-browser-link">Откройте claude.ai</a>
+                                    → <code>⌥⌘I</code> → Application → Cookies → <code>sessionKey</code>
                                 </p>
                             </div>
                             <div class="session-key-input-row">
                                 <input type="password" id="sessionKeyInput" placeholder="sk-ant-sid01-..." spellcheck="false" autocomplete="off">
-                                <button class="connect-btn" id="connectBtn">Connect</button>
+                                <button class="connect-btn" id="connectBtn">Подключить</button>
                             </div>
                             <div class="session-key-footer">
                                 <p class="session-key-error" id="sessionKeyError"></p>
-                                <button class="back-step-btn" id="backStepBtn">← Back</button>
+                                <button class="back-step-btn" id="backStepBtn">← Назад</button>
                             </div>
                         </div>
                     </div>
@@ -107,8 +116,8 @@
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                     </svg>
                     <div class="no-usage-text-group">
-                        <h3>No Usage Yet</h3>
-                        <p>Start chatting with Claude to see your usage stats</p>
+                        <h3>Пока без расхода</h3>
+                        <p>Напишите Claude — и здесь появятся лимиты</p>
                     </div>
                 </div>
             </div>
@@ -117,57 +126,50 @@
             <div class="content" id="mainContent" style="display: none;">
 
                 <!-- Compact toggle chevron — fixed position, does not move with expand -->
-                <button class="compact-collapse-btn" id="compactCollapseBtn" title="Compact mode" style="display: none;">
+                <button class="compact-collapse-btn" id="compactCollapseBtn" title="Компактный вид" aria-label="Компактный вид" style="display: none;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
                 </button>
 
-                <!-- Column Headers -->
-                <div class="usage-headers">
-                    <span></span>
-                    <span class="col-header col-header-center">Session Used</span>
-                    <span class="col-header col-header-center">Elapsed</span>
-                    <span class="col-header col-header-center">Resets In</span>
-                    <span class="col-header col-header-center">Resets At</span>
-                </div>
-
-                <!-- Session Usage -->
-                <div class="usage-section">
-                    <span class="usage-label">Current Session</span>
-                    <div class="usage-bar-group">
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="sessionProgress" style="width: 0%"></div>
+                <!-- Два кольца: внешняя дуга — сколько лимита потрачено, тонкая внутренняя —
+                     сколько времени окна уже прошло. Id те же, что у прежних полос: их обновляет app.js -->
+                <div class="gauges">
+                    <div class="gauge" id="sessionGauge">
+                        <div class="gauge-ring">
+                            <svg class="ring" width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">
+                                <circle class="ring-track" cx="48" cy="48" r="42" />
+                                <circle class="ring-usage" id="sessionProgress" cx="48" cy="48" r="42"
+                                    data-c="263.89" style="stroke-dasharray: 263.89; stroke-dashoffset: 263.89" />
+                                <circle class="ring-time-track" cx="48" cy="48" r="33" />
+                                <circle class="timer-progress ring-time" id="sessionTimer" cx="48" cy="48" r="33"
+                                    data-c="207.35" style="stroke-dasharray: 207.35; stroke-dashoffset: 207.35" />
+                            </svg>
+                            <div class="gauge-value"><span class="gauge-num" id="sessionPercentage">0%</span></div>
                         </div>
-                        <span class="usage-percentage" id="sessionPercentage">0%</span>
-                    </div>
-                    <div class="usage-elapsed-group">
-                        <svg class="mini-timer" width="24" height="24" viewBox="0 0 24 24">
-                            <circle class="timer-bg" cx="12" cy="12" r="10" />
-                            <circle class="timer-progress" id="sessionTimer" cx="12" cy="12" r="10"
-                                style="stroke-dasharray: 63; stroke-dashoffset: 63" />
-                        </svg>
-                    </div>
-                    <div class="timer-text" id="sessionTimeText">--:--</div>
-                    <div class="resets-at-text" id="sessionResetsAt">--</div>
-                </div>
-
-                <!-- Weekly Usage -->
-                <div class="usage-section">
-                    <span class="usage-label">Weekly Limit</span>
-                    <div class="usage-bar-group">
-                        <div class="progress-bar">
-                            <div class="progress-fill weekly" id="weeklyProgress" style="width: 0%"></div>
+                        <div class="gauge-meta">
+                            <span class="gauge-label">Сессия · 5 ч</span>
+                            <div class="gauge-countdown timer-text" id="sessionTimeText" data-precise="1">--:--</div>
+                            <div class="gauge-reset resets-at-text" id="sessionResetsAt">--</div>
                         </div>
-                        <span class="usage-percentage" id="weeklyPercentage">0%</span>
                     </div>
-                    <div class="usage-elapsed-group">
-                        <svg class="mini-timer" width="24" height="24" viewBox="0 0 24 24">
-                            <circle class="timer-bg" cx="12" cy="12" r="10" />
-                            <circle class="timer-progress weekly" id="weeklyTimer" cx="12" cy="12" r="10"
-                                style="stroke-dasharray: 63; stroke-dashoffset: 63" />
-                        </svg>
+
+                    <div class="gauge" id="weeklyGauge">
+                        <div class="gauge-ring">
+                            <svg class="ring" width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">
+                                <circle class="ring-track" cx="48" cy="48" r="42" />
+                                <circle class="ring-usage weekly" id="weeklyProgress" cx="48" cy="48" r="42"
+                                    data-c="263.89" style="stroke-dasharray: 263.89; stroke-dashoffset: 263.89" />
+                                <circle class="ring-time-track" cx="48" cy="48" r="33" />
+                                <circle class="timer-progress ring-time weekly" id="weeklyTimer" cx="48" cy="48" r="33"
+                                    data-c="207.35" style="stroke-dasharray: 207.35; stroke-dashoffset: 207.35" />
+                            </svg>
+                            <div class="gauge-value"><span class="gauge-num" id="weeklyPercentage">0%</span></div>
+                        </div>
+                        <div class="gauge-meta">
+                            <span class="gauge-label">Неделя · все модели</span>
+                            <div class="gauge-countdown timer-text" id="weeklyTimeText" data-precise="1">--:--</div>
+                            <div class="gauge-reset resets-at-text" id="weeklyResetsAt">--</div>
+                        </div>
                     </div>
-                    <div class="timer-text" id="weeklyTimeText">--:--</div>
-                    <div class="resets-at-text" id="weeklyResetsAt">--</div>
                 </div>
 
                 <!-- Expand Toggle -->
@@ -192,12 +194,12 @@
             <!-- Compact Content -->
             <div class="compact-content" id="compactContent" style="display: none;">
                 <!-- Expand chevron — right edge, returns to normal mode -->
-                <button class="compact-expand-btn" id="compactExpandBtn" title="Normal mode">
+                <button class="compact-expand-btn" id="compactExpandBtn" title="Обычный вид" aria-label="Обычный вид">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
                 </button>
                 <div class="compact-rows">
                     <div class="compact-row">
-                        <span class="compact-label">Session</span>
+                        <span class="compact-label">Сессия</span>
                         <div class="compact-bar-wrap">
                             <div class="compact-bar-bg">
                                 <div class="compact-bar-fill" id="compactSessionFill" style="width: 0%"></div>
@@ -206,7 +208,7 @@
                         </div>
                     </div>
                     <div class="compact-row">
-                        <span class="compact-label">Weekly</span>
+                        <span class="compact-label">Неделя</span>
                         <div class="compact-bar-wrap">
                             <div class="compact-bar-bg">
                                 <div class="compact-bar-fill weekly" id="compactWeeklyFill" style="width: 0%"></div>
@@ -225,13 +227,13 @@
                     </div>
                     <!-- Spend toggle — collapsed by default; opening it triggers a fetch
                          (spend data isn't polled while collapsed, see main.js) -->
-                    <div class="compact-expand-toggle" id="compactSpendToggle" title="Show spend">
+                    <div class="compact-expand-toggle" id="compactSpendToggle" title="Показать расходы">
                         <svg class="compact-expand-arrow" id="compactSpendArrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                             <polyline points="6 9 12 15 18 9" />
                         </svg>
                     </div>
                     <div class="compact-row" id="compactSpendRow" style="display: none;">
-                        <span class="compact-label">Spend</span>
+                        <span class="compact-label">Расходы</span>
                         <div class="compact-bar-wrap">
                             <div class="compact-bar-bg">
                                 <div class="compact-bar-fill spend" id="compactSpendFill" style="width: 0%"></div>
@@ -246,27 +248,27 @@
             <div class="settings-overlay" id="settingsOverlay" style="display: none;">
                 <div class="settings-content">
                     <div class="settings-header">
-                        <span class="settings-title">Settings</span>
-                        <button class="done-settings-btn" id="closeSettingsBtn" title="Done">Done</button>
+                        <span class="settings-title">Настройки</span>
+                        <button class="done-settings-btn" id="closeSettingsBtn" title="Готово">Готово</button>
                     </div>
 
                     <div class="settings-disclaimer">
-                        Unofficial tool — not affiliated with Anthropic.
+                        Неофициальная программа — не связана с Anthropic.
                     </div>
 
                     <div class="settings-rows">
                         <!-- Row 1: two toggles -->
                         <div class="settings-row-2col">
                             <div class="settings-col" id="autoStartCol">
-                                <span class="settings-row-label">Launch at startup</span>
+                                <span class="settings-row-label">Запуск при входе</span>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="autoStartToggle">
                                     <span class="toggle-slider"></span>
                                 </label>
-                                <span class="settings-row-hint" id="autoStartHint" style="display: none;">Not supported on Linux</span>
+                                <span class="settings-row-hint" id="autoStartHint" style="display: none;">Нет в Linux</span>
                             </div>
                             <div class="settings-col">
-                                <span class="settings-row-label" id="trayLabel">Hide from taskbar</span>
+                                <span class="settings-row-label" id="trayLabel">Скрыть из Dock</span>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="minimizeToTrayToggle">
                                     <span class="toggle-slider"></span>
@@ -277,14 +279,14 @@
                         <!-- Row 2: two toggles -->
                         <div class="settings-row-2col">
                             <div class="settings-col">
-                                <span class="settings-row-label">Always on top</span>
+                                <span class="settings-row-label">Поверх окон</span>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="alwaysOnTopToggle">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
                             <div class="settings-col">
-                                <span class="settings-row-label">Show tray stats</span>
+                                <span class="settings-row-label">Проценты в строке меню</span>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="showTrayStatsToggle">
                                     <span class="toggle-slider"></span>
@@ -295,14 +297,14 @@
                         <!-- Row 3: compact mode + usage alerts -->
                         <div class="settings-row-2col">
                             <div class="settings-col">
-                                <span class="settings-row-label">Compact mode</span>
+                                <span class="settings-row-label">Компактный вид</span>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="compactModeToggle">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
                             <div class="settings-col">
-                                <span class="settings-row-label">Usage Alerts</span>
+                                <span class="settings-row-label">Уведомления</span>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="usageAlertsToggle">
                                     <span class="toggle-slider"></span>
@@ -313,15 +315,15 @@
                         <!-- Row 4: theme + organization selector -->
                         <div class="settings-row-2col">
                             <div class="settings-col">
-                                <span class="settings-row-label">Theme</span>
+                                <span class="settings-row-label">Тема</span>
                                 <div class="theme-selector">
-                                    <button class="theme-btn active" data-theme="dark">Dark</button>
-                                    <button class="theme-btn" data-theme="light">Light</button>
-                                    <button class="theme-btn" data-theme="system">System</button>
+                                    <button class="theme-btn active" data-theme="dark">Тёмная</button>
+                                    <button class="theme-btn" data-theme="light">Светлая</button>
+                                    <button class="theme-btn" data-theme="system">Как в системе</button>
                                 </div>
                             </div>
                             <div class="settings-col" id="orgSelectorCol" style="display: none;">
-                                <span class="settings-row-label">Organization</span>
+                                <span class="settings-row-label">Организация</span>
                                 <select id="orgSelector" class="settings-select">
                                     <option value="org1">My Org (Personal)</option>
                                     <option value="org2">Acme Corp (Team)</option>
@@ -332,14 +334,14 @@
                         <!-- Row 5: time format + warn thresholds -->
                         <div class="settings-row-2col">
                             <div class="settings-col">
-                                <span class="settings-row-label">Time format</span>
+                                <span class="settings-row-label">Формат времени</span>
                                 <select id="timeFormat" class="settings-select">
-                                    <option value="12h">12h (3:59 PM)</option>
-                                    <option value="24h">24h (15:59)</option>
+                                    <option value="12h">12 ч (3:59 PM)</option>
+                                    <option value="24h">24 ч (15:59)</option>
                                 </select>
                             </div>
                             <div class="settings-col">
-                                <span class="settings-row-label">Warn at</span>
+                                <span class="settings-row-label">Предупредить при</span>
                                 <div class="threshold-group">
                                     <label class="threshold-label">
                                         <span class="threshold-dot warning-dot"></span>
@@ -358,21 +360,21 @@
                         <!-- Row 6: date format + auto refresh -->
                         <div class="settings-row-2col">
                             <div class="settings-col">
-                                <span class="settings-row-label">Date format</span>
+                                <span class="settings-row-label">Формат даты</span>
                                 <select id="weeklyDateFormat" class="settings-select">
-                                    <option value="date">Mar 13</option>
-                                    <option value="date-day">Fri Mar 13</option>
-                                    <option value="date-day-time">Fri Mar 13 + time</option>
+                                    <option value="date">13 мар.</option>
+                                    <option value="date-day">пт, 13 мар.</option>
+                                    <option value="date-day-time">пт, 13 мар. + время</option>
                                 </select>
                             </div>
                             <div class="settings-col">
-                                <span class="settings-row-label">Auto-refresh</span>
+                                <span class="settings-row-label">Обновлять</span>
                                 <select id="refreshInterval" class="settings-select">
-                                    <option value="15">Every 15s</option>
-                                    <option value="30">Every 30s</option>
-                                    <option value="60">Every 1 min</option>
-                                    <option value="120">Every 2 min</option>
-                                    <option value="300" selected>Every 5 min</option>
+                                    <option value="15">каждые 15 с</option>
+                                    <option value="30">каждые 30 с</option>
+                                    <option value="60">каждую минуту</option>
+                                    <option value="120">каждые 2 мин</option>
+                                    <option value="300" selected>каждые 5 мин</option>
                                 </select>
                             </div>
                         </div>
@@ -382,7 +384,7 @@
                     <div class="settings-footer">
                         <span class="settings-version-label" id="settingsVersionLabel">v1.5.0</span>
                         <span class="settings-update-link" id="settingsUpdateLink" style="display: none;"></span>
-                        <button class="logout-btn" id="logoutBtn">Log Out</button>
+                        <button class="logout-btn" id="logoutBtn">Выйти</button>
                         <button class="coffee-btn" id="coffeeBtn">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -392,7 +394,7 @@
                                 <line x1="10" y1="2" x2="10" y2="4" />
                                 <line x1="14" y1="2" x2="14" y2="4" />
                             </svg>
-                            Buy me a coffee
+                            Поддержать автора
                         </button>
                     </div>
                 </div>
@@ -401,12 +403,12 @@
             <div class="settings-overlay compact-settings-overlay" id="compactSettingsOverlay" style="display: none;">
                 <div class="settings-content">
                     <div class="settings-header">
-                        <span class="settings-title">Settings</span>
-                        <button class="done-settings-btn" id="closeCompactSettingsBtn" title="Done">Done</button>
+                        <span class="settings-title">Настройки</span>
+                        <button class="done-settings-btn" id="closeCompactSettingsBtn" title="Готово">Готово</button>
                     </div>
                     <div class="compact-settings-body">
                         <div class="settings-col">
-                            <span class="settings-row-label">Compact mode</span>
+                            <span class="settings-row-label">Компактный вид</span>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="compactModeToggleCompact">
                                 <span class="toggle-slider"></span>

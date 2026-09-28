@@ -95,7 +95,7 @@ function hasTrayIcon() {
 }
 
 const WIDGET_WIDTH = process.platform === 'darwin' ? 590 : 560;
-const WIDGET_HEIGHT = 155;
+const WIDGET_HEIGHT = 184; // два кольца; в renderer/app.js — то же число (WIDGET_HEIGHT_COLLAPSED)
 const COMPACT_WIDTH = 290;
 const COMPACT_HEIGHT = 105;
 const COMPACT_ROW_HEIGHT = 28; // extra height per optional row (Fable, Spend)
@@ -301,6 +301,14 @@ function createMainWindow() {
   if (savedPosition) {
     windowOptions.x = savedPosition.x;
     windowOptions.y = savedPosition.y;
+  }
+
+  // macOS: настоящее стекло — рабочий стол за окном размывает сама система.
+  // active — размытие не гаснет, когда виджет не в фокусе (он ведь всегда сбоку).
+  if (process.platform === 'darwin') {
+    windowOptions.vibrancy = 'under-window';
+    windowOptions.visualEffectState = 'active';
+    windowOptions.backgroundColor = '#00000000';
   }
 
   mainWindow = new BrowserWindow(windowOptions);
@@ -707,21 +715,21 @@ function createTray() {
     
     // Create Weekly tray icon FIRST (left position, blue)
     weeklyTray = new Tray(staticIconPath);
-    weeklyTray.setToolTip('Weekly Usage');
+    weeklyTray.setToolTip('Неделя');
     
     // Create Session tray icon SECOND (right position, purple)
     sessionTray = new Tray(staticIconPath);
-    sessionTray.setToolTip('Session Usage');
+    sessionTray.setToolTip('Сессия');
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: 'Show Widget',
+        label: 'Показать виджет',
         click: () => {
           showMainWindowSmart();
         }
       },
       {
-        label: 'Refresh',
+        label: 'Обновить',
         click: () => {
           if (mainWindow) {
             mainWindow.webContents.send('refresh-usage');
@@ -730,7 +738,7 @@ function createTray() {
       },
       { type: 'separator' },
       {
-        label: 'Log Out',
+        label: 'Выйти из Claude',
         click: async () => {
           store.delete('sessionKey');
           store.delete('organizationId');
@@ -750,7 +758,7 @@ function createTray() {
       },
       { type: 'separator' },
       {
-        label: 'Exit',
+        label: 'Закрыть',
         click: () => {
           app.quit();
         }
@@ -836,10 +844,10 @@ function formatResetTime(resetsAt, timeFormat, includeDate = false) {
   };
   
   if (includeDate) {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = ['янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
     const monthStr = months[date.getMonth()];
     const dayNum = date.getDate();
-    return `${monthStr} ${dayNum}, ${formatTime()}`;
+    return `${dayNum} ${monthStr}, ${formatTime()}`;
   } else {
     return formatTime();
   }
@@ -879,7 +887,7 @@ function updateTrayIcon(usageData) {
   // Get threshold settings and time format
   const warnThreshold = store.get('settings.warnThreshold', 75);
   const dangerThreshold = store.get('settings.dangerThreshold', 90);
-  const timeFormat = store.get('settings.timeFormat', '12h');
+  const timeFormat = store.get('settings.timeFormat', '24h');
 
   // Extract percentages and reset times from usage data
   const sessionPercent = usageData?.five_hour?.utilization || 0;
@@ -898,10 +906,10 @@ function updateTrayIcon(usageData) {
     }
     if (weeklyTray && !weeklyTray.isDestroyed()) {
       weeklyTray.setImage(weeklyIcon);
-      let weeklyTooltip = `Weekly: ${Math.round(weeklyPercent)}%`;
+      let weeklyTooltip = `Неделя: ${Math.round(weeklyPercent)}%`;
       const weeklyResetTime = formatResetTime(weeklyResetsAt, timeFormat, true);
       if (weeklyResetTime) {
-        weeklyTooltip += `\nResets: ${weeklyResetTime}`;
+        weeklyTooltip += `\nобновится ${weeklyResetTime}`;
       }
       weeklyTray.setToolTip(weeklyTooltip);
     }
@@ -916,10 +924,10 @@ function updateTrayIcon(usageData) {
     }
     if (sessionTray && !sessionTray.isDestroyed()) {
       sessionTray.setImage(sessionIcon);
-      let sessionTooltip = `Session: ${Math.round(sessionPercent)}%`;
+      let sessionTooltip = `Сессия: ${Math.round(sessionPercent)}%`;
       const sessionResetTime = formatResetTime(sessionResetsAt, timeFormat, false);
       if (sessionResetTime) {
-        sessionTooltip += `\nResets: ${sessionResetTime}`;
+        sessionTooltip += `\nобновится в ${sessionResetTime}`;
       }
       sessionTray.setToolTip(sessionTooltip);
     }
@@ -1144,7 +1152,7 @@ ipcMain.handle('get-settings', () => {
     theme: store.get('settings.theme', 'dark'),
     warnThreshold: store.get('settings.warnThreshold', 75),
     dangerThreshold: store.get('settings.dangerThreshold', 90),
-    timeFormat: store.get('settings.timeFormat', '12h'),
+    timeFormat: store.get('settings.timeFormat', '24h'),
     weeklyDateFormat: store.get('settings.weeklyDateFormat', 'date'),
     usageAlerts: store.get('settings.usageAlerts', true),
     compactMode: store.get('settings.compactMode', false),
@@ -1241,7 +1249,7 @@ ipcMain.handle('detect-session-key', async () => {
     const loginWin = new BrowserWindow({
       width: 1000,
       height: 700,
-      title: 'Claude Login - https://claude.ai/login',
+      title: 'Вход в Claude — https://claude.ai/login',
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true
@@ -1360,7 +1368,8 @@ ipcMain.handle('check-for-update', async () => {
   const latest = await fetchGithubJson(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`);
   const latestTag = (latest?.tag_name || '').replace(/^v/, '');
   if (latestTag && isNewerVersion(latestTag, current)) {
-    store.set('updateBannerVisible', true);
+    store.set('updateBannerVisible', false); // сборка со стеклом баннер не показывает
+
     return { hasUpdate: true, version: latestTag };
   }
 
@@ -1374,7 +1383,7 @@ ipcMain.handle('check-for-update', async () => {
     const newestPreRelease = Array.isArray(all) ? all.find((r) => r.prerelease) : null;
     const preTag = (newestPreRelease?.tag_name || '').replace(/^v/, '');
     if (preTag && isNewerPreRelease(preTag, current)) {
-      store.set('updateBannerVisible', true);
+      store.set('updateBannerVisible', false);
       return { hasUpdate: true, version: preTag };
     }
   }
