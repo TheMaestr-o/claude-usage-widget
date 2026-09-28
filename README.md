@@ -2,7 +2,9 @@
 
 A redesigned macOS build of [Claude Usage Widget](https://github.com/SlavomirDurej/claude-usage-widget) by **Slavomir Durej** (MIT), reworked by **[The Maestro](https://github.com/TheMaestr-o)**: glass rings, one menu bar item, statistics by day / week / month, a white-glass light theme and a smooth refresh. Unofficial — not by Anthropic.
 
-![Claude Usage Widget — The Maestro edition](docs/maestro/cover.png)
+<p align="center"><a href="https://github.com/TheMaestr-o/claude-usage-widget/releases/latest"><img src="docs/maestro/cover.png" alt="Claude Usage Widget — The Maestro edition" width="100%"></a></p>
+
+<p align="center"><a href="https://github.com/TheMaestr-o/claude-usage-widget/releases/latest"><b>Download for macOS (Apple Silicon)</b></a> · <a href="https://paypal.me/ohnedan">Support The Maestro</a></p>
 
 ## What this edition adds
 
