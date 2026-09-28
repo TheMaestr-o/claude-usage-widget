@@ -95,7 +95,7 @@ function hasTrayIcon() {
 }
 
 const WIDGET_WIDTH = process.platform === 'darwin' ? 590 : 560;
-const WIDGET_HEIGHT = 184; // два кольца; в renderer/app.js — то же число (WIDGET_HEIGHT_COLLAPSED)
+const WIDGET_HEIGHT = 184; // two rings; renderer/app.js uses the same number (WIDGET_HEIGHT_COLLAPSED)
 const COMPACT_WIDTH = 290;
 const COMPACT_HEIGHT = 105;
 const COMPACT_ROW_HEIGHT = 28; // extra height per optional row (Fable, Spend)
@@ -303,8 +303,8 @@ function createMainWindow() {
     windowOptions.y = savedPosition.y;
   }
 
-  // macOS: настоящее стекло — рабочий стол за окном размывает сама система.
-  // active — размытие не гаснет, когда виджет не в фокусе (он ведь всегда сбоку).
+  // macOS: real glass — the system blurs the desktop behind the window.
+  // 'active' keeps the blur on while the widget is not focused (it usually isn't).
   if (process.platform === 'darwin') {
     windowOptions.vibrancy = 'under-window';
     windowOptions.visualEffectState = 'active';
@@ -715,21 +715,21 @@ function createTray() {
     
     // Create Weekly tray icon FIRST (left position, blue)
     weeklyTray = new Tray(staticIconPath);
-    weeklyTray.setToolTip('Неделя');
+    weeklyTray.setToolTip(tt('weekly'));
     
     // Create Session tray icon SECOND (right position, purple)
     sessionTray = new Tray(staticIconPath);
-    sessionTray.setToolTip('Сессия');
+    sessionTray.setToolTip(tt('session'));
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: 'Показать виджет',
+        label: tt('show'),
         click: () => {
           showMainWindowSmart();
         }
       },
       {
-        label: 'Обновить',
+        label: tt('refresh'),
         click: () => {
           if (mainWindow) {
             mainWindow.webContents.send('refresh-usage');
@@ -738,7 +738,7 @@ function createTray() {
       },
       { type: 'separator' },
       {
-        label: 'Выйти из Claude',
+        label: tt('logout'),
         click: async () => {
           store.delete('sessionKey');
           store.delete('organizationId');
@@ -758,7 +758,7 @@ function createTray() {
       },
       { type: 'separator' },
       {
-        label: 'Закрыть',
+        label: tt('quit'),
         click: () => {
           app.quit();
         }
@@ -820,6 +820,25 @@ function destroyTrayIcons() {
   }
 }
 
+// Menu bar texts in the widget's language (the window has its own dictionaries in renderer/i18n.js)
+const TRAY_TEXT = {
+  en: { session: 'Session', weekly: 'Week', show: 'Show widget', refresh: 'Refresh', logout: 'Log out of Claude', quit: 'Quit', resetsAt: 'resets at {t}', resets: 'resets {t}', login: 'Log in to Claude — https://claude.ai/login' },
+  ru: { session: 'Сессия', weekly: 'Неделя', show: 'Показать виджет', refresh: 'Обновить', logout: 'Выйти из Claude', quit: 'Закрыть', resetsAt: 'обновится в {t}', resets: 'обновится {t}', login: 'Вход в Claude — https://claude.ai/login' },
+  uk: { session: 'Сесія', weekly: 'Тиждень', show: 'Показати віджет', refresh: 'Оновити', logout: 'Вийти з Claude', quit: 'Закрити', resetsAt: 'оновиться о {t}', resets: 'оновиться {t}', login: 'Вхід у Claude — https://claude.ai/login' },
+  de: { session: 'Sitzung', weekly: 'Woche', show: 'Widget anzeigen', refresh: 'Aktualisieren', logout: 'Von Claude abmelden', quit: 'Beenden', resetsAt: 'Reset um {t}', resets: 'Reset {t}', login: 'Bei Claude anmelden — https://claude.ai/login' },
+};
+const TRAY_LOCALES = { en: 'en-US', ru: 'ru-RU', uk: 'uk-UA', de: 'de-DE' };
+
+function trayLang() {
+  const lang = store.get('settings.language', 'en');
+  return TRAY_TEXT[lang] ? lang : 'en';
+}
+
+function tt(key, vars) {
+  const text = TRAY_TEXT[trayLang()][key] || TRAY_TEXT.en[key] || key;
+  return vars ? text.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '') : text;
+}
+
 /**
  * Format reset time for tray tooltip
  * @param {string} resetsAt - ISO timestamp string
@@ -844,10 +863,8 @@ function formatResetTime(resetsAt, timeFormat, includeDate = false) {
   };
   
   if (includeDate) {
-    const months = ['янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
-    const monthStr = months[date.getMonth()];
-    const dayNum = date.getDate();
-    return `${dayNum} ${monthStr}, ${formatTime()}`;
+    const day = new Intl.DateTimeFormat(TRAY_LOCALES[trayLang()], { day: 'numeric', month: 'short' }).format(date);
+    return `${day}, ${formatTime()}`;
   } else {
     return formatTime();
   }
@@ -887,7 +904,7 @@ function updateTrayIcon(usageData) {
   // Get threshold settings and time format
   const warnThreshold = store.get('settings.warnThreshold', 75);
   const dangerThreshold = store.get('settings.dangerThreshold', 90);
-  const timeFormat = store.get('settings.timeFormat', '24h');
+  const timeFormat = store.get('settings.timeFormat', '12h');
 
   // Extract percentages and reset times from usage data
   const sessionPercent = usageData?.five_hour?.utilization || 0;
@@ -906,10 +923,10 @@ function updateTrayIcon(usageData) {
     }
     if (weeklyTray && !weeklyTray.isDestroyed()) {
       weeklyTray.setImage(weeklyIcon);
-      let weeklyTooltip = `Неделя: ${Math.round(weeklyPercent)}%`;
+      let weeklyTooltip = `${tt('weekly')}: ${Math.round(weeklyPercent)}%`;
       const weeklyResetTime = formatResetTime(weeklyResetsAt, timeFormat, true);
       if (weeklyResetTime) {
-        weeklyTooltip += `\nобновится ${weeklyResetTime}`;
+        weeklyTooltip += `\n${tt('resets', { t: weeklyResetTime })}`;
       }
       weeklyTray.setToolTip(weeklyTooltip);
     }
@@ -924,10 +941,10 @@ function updateTrayIcon(usageData) {
     }
     if (sessionTray && !sessionTray.isDestroyed()) {
       sessionTray.setImage(sessionIcon);
-      let sessionTooltip = `Сессия: ${Math.round(sessionPercent)}%`;
+      let sessionTooltip = `${tt('session')}: ${Math.round(sessionPercent)}%`;
       const sessionResetTime = formatResetTime(sessionResetsAt, timeFormat, false);
       if (sessionResetTime) {
-        sessionTooltip += `\nобновится в ${sessionResetTime}`;
+        sessionTooltip += `\n${tt('resetsAt', { t: sessionResetTime })}`;
       }
       sessionTray.setToolTip(sessionTooltip);
     }
@@ -1152,7 +1169,8 @@ ipcMain.handle('get-settings', () => {
     theme: store.get('settings.theme', 'dark'),
     warnThreshold: store.get('settings.warnThreshold', 75),
     dangerThreshold: store.get('settings.dangerThreshold', 90),
-    timeFormat: store.get('settings.timeFormat', '24h'),
+    timeFormat: store.get('settings.timeFormat', '12h'),
+    language: store.get('settings.language', 'en'),
     weeklyDateFormat: store.get('settings.weeklyDateFormat', 'date'),
     usageAlerts: store.get('settings.usageAlerts', true),
     compactMode: store.get('settings.compactMode', false),
@@ -1187,6 +1205,10 @@ ipcMain.handle('save-settings', (event, settings) => {
     store.set('settings.compactSpendOpen', settings.compactSpendOpen);
   }
   store.set('settings.showTrayStats', settings.showTrayStats);
+  const languageChanged = settings.language !== undefined && settings.language !== store.get('settings.language', 'en');
+  if (settings.language !== undefined) store.set('settings.language', settings.language);
+  // New language: the menu bar icons carry their own menu and tooltips — rebuild them
+  if (languageChanged) destroyTrayIcons();
 
   const isPortable = process.platform === 'win32' && !!process.env.PORTABLE_EXECUTABLE_FILE;
 
@@ -1249,7 +1271,7 @@ ipcMain.handle('detect-session-key', async () => {
     const loginWin = new BrowserWindow({
       width: 1000,
       height: 700,
-      title: 'Вход в Claude — https://claude.ai/login',
+      title: tt('login'),
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true
@@ -1368,7 +1390,7 @@ ipcMain.handle('check-for-update', async () => {
   const latest = await fetchGithubJson(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`);
   const latestTag = (latest?.tag_name || '').replace(/^v/, '');
   if (latestTag && isNewerVersion(latestTag, current)) {
-    store.set('updateBannerVisible', false); // сборка со стеклом баннер не показывает
+    store.set('updateBannerVisible', false); // this build never shows the update banner
 
     return { hasUpdate: true, version: latestTag };
   }

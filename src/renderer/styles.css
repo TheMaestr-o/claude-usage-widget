@@ -1704,9 +1704,9 @@ body.theme-light .compact-pct {
 }
 
 /* ==========================================================================
-   Лимиты Claude — стекло (апгрейд 2026-09)
-   Поверх исходных стилей: body:not(.glass-off) поднимает вес правил, чтобы
-   они побеждали и тёмную, и светлую тему автора, не трогая остальное.
+   Claude Usage — glass (upgrade 2026-09)
+   Layered over the original styles: body:not(.glass-off) raises specificity so these
+   rules win over both of the author's themes without touching anything else.
    ========================================================================== */
 
 body {
@@ -1746,7 +1746,7 @@ body.theme-light {
     --btn-hover: rgba(0, 0, 0, 0.1);
 }
 
-/* Окно: стекло поверх системного размытия, тонкая светлая кромка сверху */
+/* Window: glass over the system blur, a thin light edge on top */
 body:not(.glass-off) .widget-container {
     background: var(--glass-fill);
     border: 0.5px solid var(--glass-edge);
@@ -1816,7 +1816,7 @@ body:not(.glass-off) .content {
     padding: 0 0 8px;
 }
 
-/* ---------- Два кольца ---------- */
+/* ---------- Two rings ---------- */
 
 .gauges {
     display: grid;
@@ -1879,7 +1879,7 @@ body:not(.glass-off) .content {
     opacity: 0.55;
 }
 
-/* Время окна — всегда спокойное: конец окна — это не тревога, а скорый сброс */
+/* Window time stays calm: the end of a window is not an alarm, it is a reset soon */
 body:not(.glass-off) .ring-time,
 body:not(.glass-off) .ring-time.elapsed-warn,
 body:not(.glass-off) .ring-time.elapsed-soon {
@@ -1946,7 +1946,7 @@ body:not(.glass-off) .gauge-reset {
     text-align: left;
 }
 
-/* У порогов — мягкое «дыхание» свечения, без мигания */
+/* At thresholds — a soft breathing glow, never blinking */
 .gauge.is-warning .ring-usage {
     animation: glow-warn 2.8s ease-in-out infinite;
 }
@@ -1969,7 +1969,7 @@ body:not(.glass-off) .gauge-reset {
     50% { filter: drop-shadow(0 0 9px rgba(255, 90, 82, 0.75)); }
 }
 
-/* ---------- Раскрытие, строки моделей, график ---------- */
+/* ---------- Expand, model rows, graph ---------- */
 
 body:not(.glass-off) .expand-toggle {
     height: 20px;
@@ -2058,7 +2058,7 @@ body:not(.glass-off) .timer-progress {
     stroke: var(--time);
 }
 
-/* ---------- Компактный вид ---------- */
+/* ---------- Compact view ---------- */
 
 body:not(.glass-off) .compact-label {
     color: var(--ink-2);
@@ -2108,7 +2108,7 @@ body:not(.glass-off) .compact-expand-btn:hover {
     background: var(--btn);
 }
 
-/* ---------- Настройки, вход ---------- */
+/* ---------- Settings, login ---------- */
 
 body:not(.glass-off) .settings-overlay {
     background: var(--glass-fill);
@@ -2139,7 +2139,7 @@ body:not(.glass-off) .settings-header {
     }
 }
 
-/* Компактный вид: тонкая полоса и процент справа — не белым по белому */
+/* Compact view: a thin bar with the percentage to its right — never white on white */
 body:not(.glass-off) .compact-bar-wrap {
     display: flex;
     align-items: center;
@@ -2173,8 +2173,455 @@ body:not(.glass-off) .compact-label {
     width: 58px;
 }
 
-/* macOS: окно — системное стекло; форму задаёт система, наша тонировка заполняет её целиком */
+/* macOS: the window is system glass shaped by the system; our tint fills it completely */
 body.vibrant:not(.glass-off) .widget-container {
     border: none;
     border-radius: 0;
+}
+
+/* ==========================================================================
+   Settings sheet, v2 — opaque sheet, grouped rows, macOS-style controls.
+   Nothing behind it shows through; labels never wrap; one accent colour.
+   ========================================================================== */
+
+body {
+    --ink-2: rgba(245, 247, 250, 0.72);
+    --ink-3: rgba(245, 247, 250, 0.52);
+    --sheet: #1e1e21;
+    --group: rgba(255, 255, 255, 0.045);
+    --hairline: rgba(255, 255, 255, 0.09);
+    --field: rgba(255, 255, 255, 0.08);
+    --field-hover: rgba(255, 255, 255, 0.12);
+    --segment: rgba(255, 255, 255, 0.18);
+    --accent: #0a84ff;
+    --switch-off: rgba(120, 120, 128, 0.38);
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23c7c7cc' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+body.theme-light {
+    --ink-2: rgba(29, 29, 31, 0.68);
+    --ink-3: rgba(29, 29, 31, 0.52);
+    --sheet: #f5f5f7;
+    --group: #ffffff;
+    --hairline: rgba(0, 0, 0, 0.08);
+    --field: rgba(0, 0, 0, 0.05);
+    --field-hover: rgba(0, 0, 0, 0.08);
+    --segment: #ffffff;
+    --accent: #007aff;
+    --switch-off: rgba(120, 120, 128, 0.22);
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236e6e73' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+body:not(.glass-off) .widget-container {
+    position: relative;
+}
+
+/* The sheet belongs to the widget frame (not the whole viewport) and is fully opaque */
+body:not(.glass-off) .settings-overlay {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    background: var(--sheet);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    color: var(--ink);
+    animation: sheet-in 0.28s cubic-bezier(0.22, 0.9, 0.24, 1);
+}
+
+@keyframes sheet-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+}
+
+body:not(.glass-off) .settings-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+}
+
+body:not(.glass-off) .settings-header {
+    height: 48px;
+    flex: none;
+    padding: 0 14px 0 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: transparent;
+    border-bottom: 0.5px solid var(--hairline);
+    -webkit-app-region: drag;
+}
+
+body:not(.glass-off) .settings-title {
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+}
+
+body:not(.glass-off) .done-settings-btn {
+    -webkit-app-region: no-drag;
+    height: 28px;
+    padding: 0 16px;
+    border: none;
+    border-radius: 14px;
+    background: var(--accent);
+    color: #fff;
+    font: 600 13px -apple-system, BlinkMacSystemFont, sans-serif;
+    cursor: pointer;
+    transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+body:not(.glass-off) .done-settings-btn:hover { filter: brightness(1.08); }
+body:not(.glass-off) .done-settings-btn:active { transform: scale(0.97); }
+
+.settings-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.settings-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    background: var(--group);
+    border: 0.5px solid var(--hairline);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.setting-toggle,
+.setting-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    padding: 0 14px;
+    border-top: 0.5px solid var(--hairline);
+}
+
+.setting-toggle { min-height: 38px; cursor: pointer; }
+.setting-field { min-height: 44px; }
+
+/* Vertical hairline between the two columns */
+.settings-group > :nth-child(odd) { border-right: 0.5px solid var(--hairline); }
+
+/* Rows are separated by a hairline on top: the first row has none, and a hidden
+   row (organization) can never leave a stray line at the bottom */
+.settings-group > :nth-child(-n + 2) { border-top: none; }
+.settings-fields > .setting-field-wide { grid-column: 1 / -1; border-right: none; }
+
+.setting-name,
+.setting-label {
+    font-size: 13px;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.setting-label { color: var(--ink-2); }
+
+body:not(.glass-off) .settings-row-hint {
+    margin-left: 6px;
+    font-size: 11px;
+    color: var(--ink-3);
+}
+
+body:not(.glass-off) .settings-col-disabled { opacity: 0.45; pointer-events: none; }
+
+/* Switch */
+body:not(.glass-off) .toggle-switch {
+    position: relative;
+    flex: none;
+    width: 36px;
+    height: 22px;
+}
+
+body:not(.glass-off) .toggle-slider {
+    position: absolute;
+    inset: 0;
+    border-radius: 11px;
+    background: var(--switch-off);
+    transition: background 0.2s ease;
+    cursor: pointer;
+}
+
+body:not(.glass-off) .toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    left: 2px;
+    top: 2px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+    transition: transform 0.22s cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+
+body:not(.glass-off) .toggle-switch input:checked + .toggle-slider {
+    background: var(--accent);
+}
+
+body:not(.glass-off) .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(14px);
+    background: #ffffff;
+}
+
+body:not(.glass-off) .toggle-switch input:focus-visible + .toggle-slider {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Selects */
+body:not(.glass-off) .settings-select {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 26px;
+    max-width: 158px;
+    padding: 0 26px 0 10px;
+    border-radius: 7px;
+    border: 0.5px solid var(--hairline);
+    background: var(--field) var(--chevron) no-repeat right 9px center;
+    color: var(--ink);
+    font: 12.5px -apple-system, BlinkMacSystemFont, sans-serif;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+body:not(.glass-off) .settings-select:hover { background-color: var(--field-hover); }
+
+body:not(.glass-off) .settings-select:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+body:not(.glass-off) .settings-select option {
+    background: #2c2c2e;
+    color: #f5f5f7;
+}
+
+body.theme-light:not(.glass-off) .settings-select option {
+    background: #ffffff;
+    color: #1d1d1f;
+}
+
+/* Theme — segmented control */
+body:not(.glass-off) .theme-selector {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--field);
+}
+
+body:not(.glass-off) .theme-btn {
+    height: 22px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink-2);
+    font: 500 12px -apple-system, BlinkMacSystemFont, sans-serif;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: none;
+    transition: background 0.18s ease, color 0.18s ease;
+}
+
+body:not(.glass-off) .theme-btn:hover { color: var(--ink); }
+
+body:not(.glass-off) .theme-btn.active {
+    background: var(--segment);
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+}
+
+/* Warn thresholds */
+body:not(.glass-off) .threshold-group { display: flex; align-items: center; gap: 10px; }
+body:not(.glass-off) .threshold-label { display: flex; align-items: center; gap: 5px; }
+body:not(.glass-off) .threshold-dot { width: 8px; height: 8px; border-radius: 50%; }
+body:not(.glass-off) .warning-dot { background: var(--warn); }
+body:not(.glass-off) .danger-dot { background: var(--danger); }
+
+body:not(.glass-off) .threshold-input {
+    width: 38px;
+    height: 24px;
+    padding: 0;
+    border-radius: 6px;
+    border: 0.5px solid var(--hairline);
+    background: var(--field);
+    color: var(--ink);
+    font: 600 12.5px -apple-system, BlinkMacSystemFont, sans-serif;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    -moz-appearance: textfield;
+}
+
+body:not(.glass-off) .threshold-input::-webkit-inner-spin-button,
+body:not(.glass-off) .threshold-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+body:not(.glass-off) .threshold-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+body:not(.glass-off) .threshold-pct { font-size: 12px; color: var(--ink-3); }
+
+/* Footer: version and disclaimer on the left, quiet buttons on the right */
+body:not(.glass-off) .settings-footer {
+    flex: none;
+    min-height: 48px;
+    padding: 0 18px;
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 10px;
+    border-top: 0.5px solid var(--hairline);
+    background: transparent;
+}
+
+body:not(.glass-off) .settings-footer .settings-version-label {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: end;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--ink-2);
+}
+
+body:not(.glass-off) .settings-footer .settings-update-link {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+    font-size: 11px;
+    color: var(--accent);
+    cursor: pointer;
+}
+
+body:not(.glass-off) .settings-footer .settings-disclaimer {
+    grid-column: 1 / 3;
+    grid-row: 2;
+    align-self: start;
+    padding: 0;
+    font-size: 10.5px;
+    color: var(--ink-3);
+    background: none;
+    border: none;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.settings-spacer { display: none; }
+
+body:not(.glass-off) .logout-btn,
+body:not(.glass-off) .coffee-btn {
+    grid-row: 1 / 3;
+    height: 28px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 8px;
+    border: 0.5px solid var(--hairline);
+    background: var(--field);
+    color: var(--ink);
+    font: 500 12px -apple-system, BlinkMacSystemFont, sans-serif;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+body:not(.glass-off) .logout-btn { grid-column: 3; }
+body:not(.glass-off) .coffee-btn { grid-column: 4; }
+body:not(.glass-off) .logout-btn:hover { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+body:not(.glass-off) .coffee-btn:hover { background: var(--field-hover); }
+body:not(.glass-off) .coffee-btn svg { color: var(--warn); }
+
+/* Compact-mode settings: one row */
+body:not(.glass-off) .compact-settings-body {
+    padding: 10px 14px;
+}
+
+body:not(.glass-off) .compact-settings-body .setting-toggle {
+    min-height: 40px;
+    border: 0.5px solid var(--hairline);
+    border-radius: 10px;
+    background: var(--group);
+}
+
+/* ---------- Loading, login, empty ---------- */
+
+body:not(.glass-off) .loading-container p,
+body:not(.glass-off) .no-usage-content,
+body:not(.glass-off) .step-text p {
+    color: var(--ink-2);
+}
+
+body:not(.glass-off) .spinner {
+    width: 22px;
+    height: 22px;
+    border: 2px solid var(--track);
+    border-top-color: var(--ink);
+    border-radius: 50%;
+}
+
+body:not(.glass-off) .step-text h3,
+body:not(.glass-off) .session-key-header h3,
+body:not(.glass-off) .no-usage-text-group h3 {
+    color: var(--ink);
+    font-family: inherit;
+    font-weight: 600;
+}
+
+body:not(.glass-off) .step-icon { color: var(--ink-2); }
+body:not(.glass-off) .step-hint { color: var(--ink-3); }
+
+body:not(.glass-off) .auto-detect-btn,
+body:not(.glass-off) .connect-btn {
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+body:not(.glass-off) .next-step-btn,
+body:not(.glass-off) .back-step-btn {
+    border: 0.5px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--field);
+    color: var(--ink);
+}
+
+body:not(.glass-off) #sessionKeyInput {
+    border: 0.5px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--field);
+    color: var(--ink);
+}
+
+body:not(.glass-off) .open-browser-link { color: var(--accent); }
+
+/* While a settings sheet is open nothing else in the widget is drawn — even a 1 % bleed
+   of the rings behind would read as noise */
+body:not(.glass-off) .widget-container:has(> .settings-overlay[style*='display: flex']) > :not(.settings-overlay) {
+    visibility: hidden;
 }
