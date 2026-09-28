@@ -1,3 +1,36 @@
+# Claude Usage Widget — *The* Maestro edition
+
+A redesigned macOS build of [Claude Usage Widget](https://github.com/SlavomirDurej/claude-usage-widget) by **Slavomir Durej** (MIT), reworked by **[The Maestro](https://github.com/TheMaestr-o)**: glass rings, one menu bar item, statistics by day / week / month, a white-glass light theme and a smooth refresh. Unofficial — not by Anthropic.
+
+![Two looks for the rings — dark and light](docs/maestro/rings.png)
+
+## What this edition adds
+
+- **Rings, two looks.** Two rings side by side, or one ring inside the other (Apple Watch style). Soft gradient arcs, threshold marks on the track, amber at 75 %, red at 90 %.
+- **One menu bar item.** Both numbers in a single item that looks like the system's own icons and adapts to a light or dark menu bar; colour only at the thresholds. Four styles to pick in Settings.
+- **Statistics you choose.** Today · Week · Month switch, three looks — line, bars, summary cards — with peak, average, time near the limit and spend. History is kept for 32 days.
+- **Light theme as white glass.** The window material follows the theme, every text keeps at least 4.5 : 1 contrast.
+- **Smooth refresh.** One continuous movement: the arc gathers into a comet, circles, and lands on the new value at twelve o'clock.
+- **Four languages.** English (default), Русский, Українська, Deutsch.
+
+![One menu bar item — pick the style in Settings](docs/maestro/menu-bar.png)
+
+![Statistics — Today · Week · Month, three looks](docs/maestro/statistics.png)
+
+<p align="center"><img src="docs/maestro/refresh-dark.gif" width="760" alt="Refresh, two rings"><br><img src="docs/maestro/refresh-light-b.gif" width="760" alt="Refresh, ring in ring, light theme"></p>
+
+### Install (Apple Silicon)
+
+Download the `.dmg` from [Releases](../../releases), drag the app to Applications. The build is not notarized: on first launch right-click the app → **Open**. macOS may ask once for access to the app's own keychain item — choose **Always Allow**.
+
+### Support
+
+If this edition is useful to you — [buy The Maestro a coffee](https://paypal.me/ohnedan). The original author can be supported [here](https://paypal.me/SlavomirDurej).
+
+---
+
+*Below is the original project's description.*
+
 # Claude Usage Widget
 
 A beautiful, standalone desktop widget for **Windows, macOS, and Linux** that displays your Claude.ai usage statistics in real-time.
