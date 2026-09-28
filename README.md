@@ -2,7 +2,7 @@
 
 A redesigned macOS build of [Claude Usage Widget](https://github.com/SlavomirDurej/claude-usage-widget) by **Slavomir Durej** (MIT), reworked by **[The Maestro](https://github.com/TheMaestr-o)**: glass rings, one menu bar item, statistics by day / week / month, a white-glass light theme and a smooth refresh. Unofficial — not by Anthropic.
 
-![Two looks for the rings — dark and light](docs/maestro/rings.png)
+![Claude Usage Widget — The Maestro edition](docs/maestro/cover.png)
 
 ## What this edition adds
 
@@ -12,6 +12,8 @@ A redesigned macOS build of [Claude Usage Widget](https://github.com/SlavomirDur
 - **Light theme as white glass.** The window material follows the theme, every text keeps at least 4.5 : 1 contrast.
 - **Smooth refresh.** One continuous movement: the arc gathers into a comet, circles, and lands on the new value at twelve o'clock.
 - **Four languages.** English (default), Русский, Українська, Deutsch.
+
+![Two looks for the rings — dark and light](docs/maestro/rings.png)
 
 ![One menu bar item — pick the style in Settings](docs/maestro/menu-bar.png)
 
