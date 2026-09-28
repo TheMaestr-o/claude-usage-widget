@@ -16,7 +16,14 @@ let isFetching = false;       // in-flight guard — prevents overlapping fetchU
 const UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const WIDGET_HEIGHT_COLLAPSED = 184; // two 96 px rings; main.js uses the same number
 const WIDGET_ROW_HEIGHT = 30;
-const GRAPH_HEIGHT = 232;
+
+// Looks chosen in Settings (stored by main.js; see get-settings for the defaults)
+let trayStyle = 'ring';       // menu bar picture: 'ring' | 'bars' | 'rings' | 'ringsText'
+let gaugeStyle = 'rings';     // top rings: 'rings' (side by side) | 'concentric' (ring in ring)
+let statsStyle = 'line';      // statistics: 'line' | 'bars' | 'summary'
+let statsPeriod = 'day';      // statistics period: 'day' | 'week' | 'month'
+let menuBarDark = false;      // macOS menu bar appearance, for the coloured tray picture
+let trayRefreshing = false;   // a manual refresh is out — the tray shows its refreshing frame
 
 // Elapsed-time ring thresholds (session/weekly/extra-row countdown circles).
 // Deliberately hardcoded and independent from the user-configurable
@@ -56,6 +63,8 @@ const elements = {
     minimizeBtn: document.getElementById('minimizeBtn'),
     closeBtn: document.getElementById('closeBtn'),
 
+    sessionGauge: document.getElementById('sessionGauge'),
+    weeklyGauge: document.getElementById('weeklyGauge'),
     sessionPercentage: document.getElementById('sessionPercentage'),
     sessionProgress: document.getElementById('sessionProgress'),
     sessionTimer: document.getElementById('sessionTimer'),
@@ -75,6 +84,15 @@ const elements = {
     extraRows: document.getElementById('extraRows'),
     graphSection: document.getElementById('graphSection'),
     usageChart: document.getElementById('usageChart'),
+    statsTitle: document.getElementById('statsTitle'),
+    statsPeriodSwitch: document.getElementById('statsPeriodSwitch'),
+    statsCards: document.getElementById('statsCards'),
+    statsHeat: document.getElementById('statsHeat'),
+    statsSummary: document.getElementById('statsSummary'),
+    trayStyleCol: document.getElementById('trayStyleCol'),
+    trayStylePicker: document.getElementById('trayStylePicker'),
+    gaugeStylePicker: document.getElementById('gaugeStylePicker'),
+    statsStylePicker: document.getElementById('statsStylePicker'),
 
     settingsBtn: document.getElementById('settingsBtn'),
     settingsOverlay: document.getElementById('settingsOverlay'),
@@ -188,6 +206,15 @@ async function init() {
     dangerThreshold = settings.dangerThreshold;
     compactSpendOpen = !!settings.compactSpendOpen;
     applyCompactSpendRow();
+    trayStyle = TRAY_STYLES.includes(settings.trayStyle) ? settings.trayStyle : 'ring';
+    statsStyle = STATS_STYLES.includes(settings.statsStyle) ? settings.statsStyle : 'line';
+    statsPeriod = STATS_PERIODS.includes(settings.statsPeriod) ? settings.statsPeriod : 'day';
+    applyGaugeStyle(settings.gaugeStyle);
+    placeThresholdTicks();
+    markStatsPeriod();
+    if (window.electronAPI.platform === 'darwin' && window.electronAPI.getMenuBarDark) {
+        try { menuBarDark = !!(await window.electronAPI.getMenuBarDark()); } catch { menuBarDark = false; }
+    }
 
     // Restore compact mode from saved settings
     if (settings.compactMode) {
@@ -274,11 +301,43 @@ function setupEventListeners() {
         elements.sessionKeyError.textContent = '';
     });
 
+    // A deliberate press gets the recharge: the arcs themselves orbit while the request is
+    // out and land on the fresh values (see rechargeRefresh). Auto-refresh stays quiet.
     elements.refreshBtn.addEventListener('click', async () => {
         debugLog('Refresh button clicked');
-        elements.refreshBtn.classList.add('spinning');
-        await fetchUsageData();
-        elements.refreshBtn.classList.remove('spinning');
+        if (recharge || compactSweep) return;
+        await rechargeRefresh();
+    });
+
+    // Statistics period — applies at once and is remembered like the graph toggle
+    elements.statsPeriodSwitch.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-period]');
+        if (!btn || btn.dataset.period === statsPeriod) return;
+        statsPeriod = btn.dataset.period;
+        markStatsPeriod();
+        renderStats();
+        _saveViewState();
+    });
+
+    // Looks in Settings: each applies at once (a live preview, like the theme) and is
+    // stored with Done
+    elements.trayStylePicker.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-tray-style]');
+        if (!btn) return;
+        trayStyle = btn.dataset.trayStyle;
+        markPicker(elements.trayStylePicker, 'trayStyle', trayStyle);
+        pushTrayImage(true);
+    });
+    elements.gaugeStylePicker.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-gauge-style]');
+        if (btn) applyGaugeStyle(btn.dataset.gaugeStyle);
+    });
+    elements.statsStylePicker.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-stats-style]');
+        if (!btn) return;
+        statsStyle = btn.dataset.statsStyle;
+        markPicker(elements.statsStylePicker, 'statsStyle', statsStyle);
+        if (graphVisible) renderStats();
     });
 
     elements.graphBtn.addEventListener('click', async () => {
@@ -384,13 +443,22 @@ function setupEventListeners() {
         if (!elements.showTrayStatsToggle.checked && elements.minimizeToTrayToggle.checked) {
             elements.minimizeToTrayToggle.checked = false;
         }
+        applyTrayStyleRowState();
+    });
+    elements.minimizeToTrayToggle.addEventListener('change', applyTrayStyleRowState);
+
+    // Listen for refresh requests from tray — quiet in the widget; the menu bar picture
+    // shows its refreshing frame, since that is where the user is looking
+    window.electronAPI.onRefreshUsage(async () => {
+        if (elements.refreshBtn && !recharge) elements.refreshBtn.classList.add('spinning');
+        await fetchUsageData({ trayFrame: true });
+        if (elements.refreshBtn) elements.refreshBtn.classList.remove('spinning');
     });
 
-    // Listen for refresh requests from tray
-    window.electronAPI.onRefreshUsage(async () => {
-        if (elements.refreshBtn) elements.refreshBtn.classList.add('spinning');
-        await fetchUsageData();
-        if (elements.refreshBtn) elements.refreshBtn.classList.remove('spinning');
+    // The menu bar switched between light and dark: redraw its picture for it
+    window.electronAPI.onMenuBarAppearance?.((dark) => {
+        menuBarDark = dark;
+        pushTrayImage();
     });
 
     // Listen for session expiration events (403 errors)
@@ -466,8 +534,9 @@ function setupEventListeners() {
         }
         await loadSettings();
         elements.settingsOverlay.style.display = 'flex';
-        // Tall enough for every row without scrolling; one more row when the account has organizations
-        window.electronAPI.resizeWindow(elements.orgSelectorCol.style.display === 'none' ? 392 : 436);
+        // Tall enough for every row without scrolling (one more row when the account has
+        // organizations; the menu bar row only on a Mac) — measured, so no language cuts it
+        window.electronAPI.resizeWindow(settingsSheetHeight());
     });
 
     // Close compact settings — apply compact toggle value then close
@@ -559,38 +628,58 @@ async function handleAutoDetect() {
     }
 }
 
-// Fetch usage data from Claude API
+// Fetch usage data from Claude API. Resolves true when fresh data arrived.
+// options.trayFrame: a manual refresh — the menu bar picture shows its refreshing frame
+// until the answer is in. A call made while a request is out waits for that one instead
+// of sending another (so a refresh pressed mid-request still lands on its answer).
+let inflightFetch = null;
+
 async function fetchUsageData(options = {}) {
     debugLog('fetchUsageData called');
 
     if (isFetching) {
-        debugLog('Fetch already in flight — skipping');
-        return;
+        debugLog('Fetch already in flight — waiting for it');
+        return inflightFetch || false;
     }
 
     if (!credentials.sessionKey || !credentials.organizationId) {
         debugLog('Missing credentials, showing login');
         showLoginRequired();
-        return;
+        return false;
     }
 
     isFetching = true;
-    try {
-        debugLog('Calling electronAPI.fetchUsageData...');
-        const data = await window.electronAPI.fetchUsageData(options);
-        debugLog('Received usage data:', data);
-        updateUI(data);
-    } catch (error) {
-        console.error('Error fetching usage data:', error);
-        if (error.message.includes('SessionExpired') || error.message.includes('Unauthorized')) {
-            credentials = { sessionKey: null, organizationId: null };
-            showLoginRequired();
-        } else {
-            debugLog('Failed to fetch usage data');
-        }
-    } finally {
-        isFetching = false;
+    if (options.trayFrame) {
+        trayRefreshing = true;
+        pushTrayImage();
     }
+    inflightFetch = (async () => {
+        try {
+            debugLog('Calling electronAPI.fetchUsageData...');
+            const data = await window.electronAPI.fetchUsageData(options);
+            debugLog('Received usage data:', data);
+            trayRefreshing = false;
+            updateUI(data);
+            return true;
+        } catch (error) {
+            console.error('Error fetching usage data:', error);
+            if (error.message.includes('SessionExpired') || error.message.includes('Unauthorized')) {
+                credentials = { sessionKey: null, organizationId: null };
+                showLoginRequired();
+            } else {
+                debugLog('Failed to fetch usage data');
+            }
+            return false;
+        } finally {
+            isFetching = false;
+            inflightFetch = null;
+            if (trayRefreshing) {
+                trayRefreshing = false;
+                pushTrayImage();
+            }
+        }
+    })();
+    return inflightFetch;
 }
 
 
@@ -694,6 +783,22 @@ function buildCreditsRow(value) {
     return row;
 }
 
+// Model rows are rebuilt on every update; each bar starts at the width it had before and
+// eases to the new one (the fill's CSS width transition does the easing)
+const extraRowWidths = new Map();
+
+function makeExtraFill(key, colorClass, utilization) {
+    const target = Math.min(Math.max(utilization, 0), 100);
+    const progressFill = document.createElement('div');
+    progressFill.className = `progress-fill ${colorClass}`;
+    const previous = extraRowWidths.get(key);
+    progressFill.style.width = `${previous ?? target}%`;
+    if (previous !== undefined && previous !== target) progressFill.dataset.target = String(target);
+    extraRowWidths.set(key, target);
+    progressFill.classList.toggle('has-value', utilization > 0);
+    return progressFill;
+}
+
 function buildExtraRows(data) {
 
     // Don't clear existing rows if we don't have new data to replace them with
@@ -757,10 +862,7 @@ function buildExtraRows(data) {
             barGroup.className = 'usage-bar-group spend-bar-group';
             const progressBar = document.createElement('div');
             progressBar.className = 'progress-bar';
-            const progressFill = document.createElement('div');
-            progressFill.className = `progress-fill ${colorClass}`;
-            progressFill.style.width = `${Math.min(utilization, 100)}%`;
-            progressFill.classList.toggle('has-value', utilization > 0);
+            const progressFill = makeExtraFill(key, colorClass, utilization);
 
             // Apply warning/danger thresholds to extra usage bar
             if (utilization >= dangerThreshold) {
@@ -797,10 +899,7 @@ function buildExtraRows(data) {
             barGroup.className = 'usage-bar-group';
             const progressBar = document.createElement('div');
             progressBar.className = 'progress-bar';
-            const progressFill = document.createElement('div');
-            progressFill.className = `progress-fill ${colorClass}`;
-            progressFill.style.width = `${Math.min(utilization, 100)}%`;
-            progressFill.classList.toggle('has-value', utilization > 0);
+            const progressFill = makeExtraFill(key, colorClass, utilization);
             // Apply warning/danger thresholds — same check the spend row and
             // compact mode already use, previously missing here so every
             // model row (Sonnet, Opus, Fable, etc.) rendered flat regardless
@@ -869,6 +968,16 @@ function buildExtraRows(data) {
         }
     }
 
+    // Bars that changed: the rows were drawn at their old widths — commit that, then move
+    const moving = elements.extraRows.querySelectorAll('.progress-fill[data-target]');
+    if (moving.length) {
+        void elements.extraRows.offsetWidth;
+        moving.forEach((fill) => {
+            fill.style.width = `${fill.dataset.target}%`;
+            delete fill.dataset.target;
+        });
+    }
+
     // Hide toggle if no extra rows
     elements.expandToggle.style.display = count > 0 ? 'flex' : 'none';
     if (count === 0 && isExpanded) {
@@ -901,6 +1010,8 @@ const BANNER_HEIGHT = 28;
 const EXPAND_OVERHEAD = 28; // margin-top(12) + padding-top(6) + bottom buffer(10)
 
 function resizeWidget(bannerVisible) {
+    // The settings sheet sets its own height; shrinking under it would cut it off
+    if (elements.settingsOverlay.style.display === 'flex') return;
     const hasBanner = bannerVisible !== undefined
         ? bannerVisible
         : elements.updateBanner.style.display !== 'none';
@@ -909,7 +1020,7 @@ function resizeWidget(bannerVisible) {
     const expandedOffset = isExpanded && extraCount > 0
         ? EXPAND_OVERHEAD + (extraCount * WIDGET_ROW_HEIGHT)
         : 0;
-    const graphOffset = graphVisible ? GRAPH_HEIGHT : 0;
+    const graphOffset = graphVisible ? statsSectionHeight() : 0;
     const totalHeight = WIDGET_HEIGHT_COLLAPSED + expandedOffset + graphOffset + bannerOffset;
     window.electronAPI.resizeWindow(totalHeight);
 }
@@ -951,6 +1062,9 @@ function updateUI(data) {
 
     // Update compact bars in parallel if compact mode is active
     if (isCompactMode) updateCompactBars(data);
+
+    // macOS menu bar picture follows every update
+    pushTrayImage();
 
     // On first load, seed alert flags so we don't fire for thresholds
     // the user can already see when the app starts
@@ -1053,6 +1167,9 @@ function checkUsageAlerts(data) {
 
 // Apply or remove compact mode — switches view, resizes window, syncs all toggles
 function applyCompactMode(compact) {
+    // A recharge belongs to the rings, a sweep to the bars: switching views ends both
+    stopRecharge();
+    endCompactSweep();
     isCompactMode = compact;
 
     // Add/remove compact-mode class from body for CSS styling
@@ -1120,14 +1237,19 @@ function placeCompactPercents() {
 }
 
 function updateCompactBars(data) {
+    // While the light sweeps the tracks the fresh values wait; they ease in when it ends
+    if (compactSweep) {
+        compactSweep.pending = data;
+        return;
+    }
     placeCompactPercents();
     const sessionPct = Math.min(Math.max(data.five_hour?.utilization || 0, 0), 100);
     const weeklyPct = Math.min(Math.max(data.seven_day?.utilization || 0, 0), 100);
 
     elements.compactSessionFill.style.width = `${sessionPct}%`;
-    elements.compactSessionPct.textContent = `${Math.round(sessionPct)}%`;
+    showPercent(elements.compactSessionPct, Math.round(sessionPct));
     elements.compactWeeklyFill.style.width = `${weeklyPct}%`;
-    elements.compactWeeklyPct.textContent = `${Math.round(weeklyPct)}%`;
+    showPercent(elements.compactWeeklyPct, Math.round(weeklyPct));
 
     // Apply warning/danger classes to compact bars
     elements.compactSessionFill.className = 'compact-bar-fill';
@@ -1149,7 +1271,7 @@ function updateCompactBars(data) {
         const fablePct = Math.min(Math.max(data.seven_day_fable.utilization || 0, 0), 100);
         elements.compactFableRow.style.display = '';
         elements.compactFableFill.style.width = `${fablePct}%`;
-        elements.compactFablePct.textContent = `${Math.round(fablePct)}%`;
+        showPercent(elements.compactFablePct, Math.round(fablePct));
         elements.compactFableFill.className = 'compact-bar-fill fable';
         if (fablePct >= dangerThreshold) elements.compactFableFill.classList.add('danger');
         else if (fablePct >= warnThreshold) elements.compactFableFill.classList.add('warning');
@@ -1164,7 +1286,7 @@ function updateCompactBars(data) {
     if (compactSpendOpen && data.extra_usage && data.extra_usage.utilization !== undefined) {
         const spendPct = Math.min(Math.max(data.extra_usage.utilization || 0, 0), 100);
         elements.compactSpendFill.style.width = `${spendPct}%`;
-        elements.compactSpendPct.textContent = `${Math.round(spendPct)}%`;
+        showPercent(elements.compactSpendPct, Math.round(spendPct));
         elements.compactSpendFill.className = 'compact-bar-fill spend';
         if (spendPct >= dangerThreshold) elements.compactSpendFill.classList.add('danger');
         else if (spendPct >= warnThreshold) elements.compactSpendFill.classList.add('warning');
@@ -1200,6 +1322,7 @@ async function _saveViewState() {
         const settings = window._cachedSettings || await window.electronAPI.getSettings();
         settings.graphVisible = graphVisible;
         settings.expandedOpen = isExpanded;
+        settings.statsPeriod = statsPeriod;
         window._cachedSettings = settings;
         await window.electronAPI.saveSettings(settings);
     }, 300);
@@ -1347,12 +1470,14 @@ function tickCountdowns() {
 }
 
 // The number counts up to its new value; on first show it starts from zero
-function animatePercent(el, to) {
+function animatePercent(el, to, duration = 900) {
+    // Already counting towards this value: let that count finish undisturbed
+    if (el._raf && el.dataset.v === String(to)) return;
     const from = el.dataset.v === undefined ? 0 : Number(el.dataset.v);
     el.dataset.v = String(to);
     const render = (v) => {
         const n = String(Math.round(v));
-        if (el.classList.contains('gauge-num')) {
+        if (el.classList.contains('gauge-num') || el.classList.contains('gauge-meta-pct')) {
             // Big number with a small percent sign next to it
             const pct = document.createElement('span');
             pct.className = 'gauge-pct';
@@ -1363,12 +1488,12 @@ function animatePercent(el, to) {
         }
     };
     if (el._raf) cancelAnimationFrame(el._raf);
+    el._raf = 0;
     if (from === to || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         render(to);
         return;
     }
     const start = performance.now();
-    const duration = 900;
     const step = (now) => {
         const t = Math.min(1, (now - start) / duration);
         render(from + (to - from) * (1 - Math.pow(1 - t, 3)));
@@ -1377,29 +1502,316 @@ function animatePercent(el, to) {
     el._raf = requestAnimationFrame(step);
 }
 
+// A number that a flying ring holds back: it waits on the element until the ring lands
+// (see the recharge below); otherwise it counts to the value at once
+function showPercent(el, value) {
+    if (rechargeHolds(el)) {
+        el.dataset.pending = String(value);
+        return;
+    }
+    delete el.dataset.pending;
+    animatePercent(el, value);
+}
+
 // Update a progress bar — or a ring: a ring's arc carries its circumference in data-c
 function updateProgressBar(progressElement, percentageElement, value, isWeekly = false) {
     const percentage = Math.min(Math.max(value, 0), 100);
     const circumference = Number(progressElement.dataset.c || 0);
+    const gauge = progressElement.closest('.gauge');
+    // A ring in flight lands on this value instead of jumping to it now
+    const flight = rechargeFlight(gauge);
 
     if (circumference) {
-        progressElement.style.strokeDashoffset = `${circumference * (1 - percentage / 100)}`;
+        if (flight) flight.target = percentage / 100;
+        else progressElement.style.strokeDashoffset = `${circumference * (1 - percentage / 100)}`;
     } else {
         progressElement.style.width = `${percentage}%`;
     }
-    animatePercent(percentageElement, Math.round(percentage));
+    showPercent(percentageElement, Math.round(percentage));
+    // Style B shows the same number beside the rings
+    const metaPct = gauge && gauge.querySelector('.gauge-meta-pct');
+    if (metaPct) showPercent(metaPct, Math.round(percentage));
 
     // State of the whole gauge — drives the colour and the soft glow at thresholds
-    const gauge = progressElement.closest('.gauge');
+    const state = percentage >= dangerThreshold ? 'danger' : percentage >= warnThreshold ? 'warning' : '';
+    if (flight && !flight.released) flight.pendingState = state;
+    else applyGaugeState(progressElement, gauge, state);
+}
+
+function applyGaugeState(progressElement, gauge, state) {
     progressElement.classList.remove('warning', 'danger');
     if (gauge) gauge.classList.remove('is-warning', 'is-danger');
-    if (percentage >= dangerThreshold) {
+    if (state === 'danger') {
         progressElement.classList.add('danger');
         if (gauge) gauge.classList.add('is-danger');
-    } else if (percentage >= warnThreshold) {
+    } else if (state === 'warning') {
         progressElement.classList.add('warning');
         if (gauge) gauge.classList.add('is-warning');
     }
+}
+
+// ---------- Recharge: the manual refresh ----------
+// One continuous movement, nothing swapped or drained: each usage arc takes off (spins up
+// while shrinking to a comet and fading its tail), orbits while the request is out, and
+// lands — decelerating onto the next full turn so it stops exactly at twelve o'clock —
+// growing to the fresh value with a slight spring. The thin time arc turns with it; the
+// big number dims in flight and counts to the new value as the ring lands. The week ring
+// starts a little later, so the two land apart. Never shorter than RECHARGE.minFlight.
+const RECHARGE = {
+    speed: 400,        // cruising angular speed, degrees per second
+    takeoff: 450,      // ms from rest to cruising speed
+    minFlight: 1100,   // ms — no ring lands sooner than this after its start
+    comet: 0.24,       // arc length in flight, as a share of the ring
+    tail: 0.06,        // opacity of the arc's start (its tail) in flight
+    stagger: 120,      // ms between the session and the week ring
+    dim: 0.55,         // opacity of the big number in flight
+    minTurn: 200,      // degrees — the landing turn is at least this long
+};
+let recharge = null;
+
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+const lerp = (a, b, k) => a + (b - a) * k;
+const smoothstep = (a, b, x) => {
+    const k = clamp01((x - a) / (b - a));
+    return k * k * (3 - 2 * k);
+};
+// Gentle spring: settles on 1 after a small overshoot (about 6 % of the move)
+const easeOutBack = (x) => {
+    const c1 = 1.25;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+};
+const easeInOutSine = (x) => -(Math.cos(Math.PI * x) - 1) / 2;
+
+function rechargeFlight(gauge) {
+    if (!recharge || !gauge) return null;
+    return recharge.rings.find((ring) => ring.gauge === gauge && ring.phase !== 'done') || null;
+}
+
+// Numbers are held while their ring is in flight and has not started to land yet
+function rechargeHolds(el) {
+    if (!recharge) return false;
+    const ring = recharge.rings.find((r) => r.nums.includes(el));
+    return !!ring && ring.phase !== 'done' && !ring.released;
+}
+
+async function rechargeRefresh() {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (isCompactMode) {
+        await compactSweepRefresh(reduced);
+        return;
+    }
+    const ringsShown = elements.mainContent.style.display !== 'none' && !!latestUsageData;
+    if (reduced || !ringsShown) {
+        await fetchUsageData({ trayFrame: true });
+        return;
+    }
+    startRecharge();
+    await fetchUsageData({ trayFrame: true });
+    if (recharge) {
+        recharge.fetched = true;
+        await recharge.done;
+    }
+}
+
+function startRecharge() {
+    const start = performance.now();
+    const icon = elements.refreshBtn.querySelector('svg');
+    const values = [latestUsageData?.five_hour?.utilization || 0, latestUsageData?.seven_day?.utilization || 0];
+    const rings = [elements.sessionGauge, elements.weeklyGauge].map((gauge, i) => {
+        const arc = gauge.querySelector('.ring-usage');
+        const C = Number(arc.dataset.c);
+        // Start from what is on screen right now, even mid-transition
+        const shown = parseFloat(getComputedStyle(arc).strokeDashoffset);
+        const from = Number.isFinite(shown) ? clamp01(1 - shown / C) : clamp01(values[i] / 100);
+        return {
+            gauge, arc, C, from,
+            time: gauge.querySelector('.ring-time'),
+            nums: [...gauge.querySelectorAll('.gauge-num, .gauge-meta-pct')],
+            start: start + i * RECHARGE.stagger,
+            target: clamp01(Math.min(values[i], 100) / 100),
+            phase: 'wait', theta: 0, len: from, tail: 1, dim: 1,
+            released: false, pendingState: undefined,
+        };
+    });
+    recharge = { rings, icon, fetched: false, raf: 0, resolve: null };
+    recharge.done = new Promise((resolve) => { recharge.resolve = resolve; });
+    elements.refreshBtn.classList.remove('spinning');
+    document.body.classList.add('recharging');
+    rings.forEach(paintRing);
+    recharge.raf = requestAnimationFrame(rechargeFrame);
+}
+
+function rechargeFrame(now) {
+    const r = recharge;
+    if (!r) return;
+    // The rings went away (login screen, compact view): stop cleanly
+    if (elements.mainContent.style.display === 'none' || isCompactMode) {
+        stopRecharge();
+        return;
+    }
+    for (const ring of r.rings) stepRing(ring, now, r.fetched);
+    // The refresh icon turns with the session ring, so it also comes to rest upright
+    if (r.icon) r.icon.style.transform = `rotate(${(r.rings[0].theta % 360).toFixed(2)}deg)`;
+    if (r.rings.every((ring) => ring.phase === 'done')) {
+        finishRecharge();
+        return;
+    }
+    r.raf = requestAnimationFrame(rechargeFrame);
+}
+
+function stepRing(ring, now, fetched) {
+    if (ring.phase === 'done') return;
+    const w = RECHARGE.speed / 1000; // degrees per ms
+    const t = now - ring.start;
+    if (t < 0) return; // the week ring waits for its turn
+    if (ring.phase === 'wait') ring.phase = 'takeoff';
+
+    if (ring.phase === 'takeoff') {
+        if (t < RECHARGE.takeoff) {
+            // Constant acceleration from rest up to cruising speed
+            ring.theta = 0.5 * (w / RECHARGE.takeoff) * t * t;
+            const k = easeInOutSine(t / RECHARGE.takeoff);
+            ring.len = lerp(ring.from, RECHARGE.comet, k);
+            ring.tail = lerp(1, RECHARGE.tail, k);
+            ring.dim = lerp(1, RECHARGE.dim, k);
+        } else {
+            ring.phase = 'orbit';
+        }
+    }
+
+    if (ring.phase === 'orbit') {
+        const cruise = t - RECHARGE.takeoff;
+        ring.theta = 0.5 * w * RECHARGE.takeoff + w * cruise;
+        ring.len = RECHARGE.comet;
+        ring.tail = RECHARGE.tail;
+        ring.dim = RECHARGE.dim;
+        if (fetched && t >= RECHARGE.minFlight) {
+            // Land on the next full turn at least minTurn ahead. θ(u) = θ0 + Δ·(1 − (1 − u)^1.7)
+            // leaves at cruising speed when the duration is 1.7·Δ/ω, and stops at rest.
+            ring.phase = 'landing';
+            ring.landStart = now;
+            ring.theta0 = ring.theta;
+            ring.delta = Math.ceil((ring.theta + RECHARGE.minTurn) / 360) * 360 - ring.theta;
+            ring.landDur = (1.7 * ring.delta) / w;
+            ring.landTo = ring.target;
+            ring.spring = ring.landTo < 0.88; // a full ring must not overshoot into itself
+        }
+    }
+
+    if (ring.phase === 'landing') {
+        const u = clamp01((now - ring.landStart) / ring.landDur);
+        ring.theta = ring.theta0 + ring.delta * (1 - Math.pow(1 - u, 1.7));
+        const grow = smoothstep(0.3, 1, u);
+        ring.len = clamp01(lerp(RECHARGE.comet, ring.landTo, ring.spring ? easeOutBack(grow) : grow));
+        ring.tail = lerp(RECHARGE.tail, 1, smoothstep(0.25, 0.85, u));
+        ring.dim = lerp(RECHARGE.dim, 1, smoothstep(0.3, 0.8, u));
+        if (!ring.released && u >= 0.3) releaseRing(ring, 0.7 * ring.landDur);
+        if (u >= 1) {
+            ring.theta = ring.theta0 + ring.delta;
+            ring.len = ring.landTo;
+            ring.tail = 1;
+            ring.dim = 1;
+            ring.phase = 'done';
+            paintRing(ring);
+            landRing(ring);
+            return;
+        }
+    }
+    paintRing(ring);
+}
+
+function paintRing(ring) {
+    const turn = `rotate(${(ring.theta % 360).toFixed(3)}deg)`;
+    ring.arc.style.transform = turn;
+    if (ring.time) ring.time.style.transform = turn;
+    ring.arc.style.strokeDashoffset = (ring.C * (1 - ring.len)).toFixed(3);
+    ring.gauge.style.setProperty('--tail', ring.tail.toFixed(3));
+    for (const el of ring.nums) el.style.opacity = ring.dim.toFixed(3);
+}
+
+// The ring starts to grow: colour state and the held numbers go with it
+function releaseRing(ring, countMs) {
+    ring.released = true;
+    if (ring.pendingState !== undefined) {
+        applyGaugeState(ring.arc, ring.gauge, ring.pendingState);
+        ring.pendingState = undefined;
+    }
+    for (const el of ring.nums) {
+        if (el.dataset.pending === undefined) continue;
+        const value = Number(el.dataset.pending);
+        delete el.dataset.pending;
+        animatePercent(el, value, countMs);
+    }
+}
+
+// Landed: hand the ring back to the normal styles, then a short glow
+function landRing(ring) {
+    releaseRing(ring, 400);
+    ring.arc.style.transform = '';
+    if (ring.time) ring.time.style.transform = '';
+    ring.gauge.style.removeProperty('--tail');
+    for (const el of ring.nums) el.style.opacity = '';
+    // A value that arrived during the landing still wins
+    ring.arc.style.strokeDashoffset = `${ring.C * (1 - ring.target)}`;
+    ring.gauge.classList.remove('landed');
+    void ring.gauge.offsetWidth;
+    ring.gauge.classList.add('landed');
+    clearTimeout(ring.gauge._landedTimer);
+    ring.gauge._landedTimer = setTimeout(() => ring.gauge.classList.remove('landed'), 650);
+}
+
+function finishRecharge() {
+    const r = recharge;
+    if (!r) return;
+    if (r.icon) r.icon.style.transform = '';
+    recharge = null;
+    document.body.classList.remove('recharging');
+    r.resolve();
+}
+
+// Stop at once (the rings went away): everything back to its plain state and values
+function stopRecharge() {
+    const r = recharge;
+    if (!r) return;
+    cancelAnimationFrame(r.raf);
+    for (const ring of r.rings) {
+        if (ring.phase === 'done') continue;
+        ring.phase = 'done';
+        ring.arc.style.transform = '';
+        if (ring.time) ring.time.style.transform = '';
+        ring.gauge.style.removeProperty('--tail');
+        ring.arc.style.strokeDashoffset = `${ring.C * (1 - ring.target)}`;
+        for (const el of ring.nums) el.style.opacity = '';
+        releaseRing(ring, 0);
+    }
+    finishRecharge();
+}
+
+// ---------- Compact view: a light sweeps the bar tracks while the request is out ----------
+let compactSweep = null;
+const COMPACT_SWEEP_MIN = 900; // ms — at least one pass of the light
+
+async function compactSweepRefresh(reduced) {
+    if (reduced) {
+        await fetchUsageData({ trayFrame: true });
+        return;
+    }
+    compactSweep = { pending: null };
+    elements.compactContent.classList.add('sweeping');
+    const onePass = new Promise((resolve) => setTimeout(resolve, COMPACT_SWEEP_MIN));
+    await fetchUsageData({ trayFrame: true });
+    await onePass;
+    endCompactSweep();
+}
+
+// The light fades where it is; the waiting values ease in (bar widths have transitions)
+function endCompactSweep() {
+    const sweep = compactSweep;
+    if (!sweep) return;
+    compactSweep = null;
+    elements.compactContent.classList.remove('sweeping');
+    if (sweep.pending && isCompactMode) updateCompactBars(sweep.pending);
 }
 
 // Format reset date for the "Resets At" column
@@ -1524,6 +1936,9 @@ function showLoginRequired() {
         clearInterval(countdownInterval);
         countdownInterval = null;
     }
+    // The rings and bars are gone: end any refresh animation cleanly
+    stopRecharge();
+    endCompactSweep();
     // Reset fetch guard so it can't get permanently stuck across login/logout
     isFetching = false;
     // Reset alert state so a new session doesn't inherit suppressed alerts
@@ -1563,7 +1978,8 @@ function startAutoUpdate() {
     const settings = window._cachedSettings || {};
     const intervalSecs = parseInt(settings.refreshInterval) || 300;
     updateInterval = setInterval(async () => {
-        if (elements.refreshBtn) elements.refreshBtn.classList.add('spinning');
+        // A recharge already turns the icon; the quiet spin is for automatic refreshes only
+        if (elements.refreshBtn && !recharge) elements.refreshBtn.classList.add('spinning');
         await fetchUsageData();
         if (elements.refreshBtn) elements.refreshBtn.classList.remove('spinning');
     }, intervalSecs * 1000);
@@ -1576,194 +1992,354 @@ function stopAutoUpdate() {
     }
 }
 
-async function loadChart() {
-    const history = await window.electronAPI.getUsageHistory();
-    if (!history.length) return;
-    renderChart(history);
+// ---------- Statistics ----------
+// One history, three looks and three periods. Buckets: today by hour, the last 7 and the
+// last 30 days by day (today last). The same numbers feed every look.
+const STATS_STYLES = ['line', 'bars', 'summary'];
+const STATS_PERIODS = ['day', 'week', 'month'];
+const STATS_HEIGHTS = { line: 250, bars: 250, summary: 202 }; // must match .stats-section in CSS
+const STATS_MARGIN = 12;
+const MINUTE_MS = 60 * 1000;
+const NEAR_LIMIT_GAP_CAP = 15 * MINUTE_MS; // a longer gap means the app was not watching
+const ACTIVE_GAP_CAP = 10 * MINUTE_MS;
+let statsHistory = [];
+
+function statsSectionHeight() {
+    return (STATS_HEIGHTS[statsStyle] || STATS_HEIGHTS.line) + STATS_MARGIN;
 }
 
-function renderChart(history) {
-    if (usageChart) usageChart.destroy();
+async function loadChart() {
+    let history = [];
+    try {
+        history = await window.electronAPI.getUsageHistory();
+    } catch (error) {
+        debugLog('History unavailable', error);
+    }
+    statsHistory = Array.isArray(history) ? history : [];
+    renderStats();
+}
 
-    const showSonnet = isExpanded && !!latestUsageData?.seven_day_sonnet;
-    const showOpus = isExpanded && !!latestUsageData?.seven_day_opus;
-    const showFable = isExpanded && !!latestUsageData?.seven_day_fable;
-    const showCowork = isExpanded && !!latestUsageData?.seven_day_cowork;
-    const showDesign = isExpanded && !!latestUsageData?.seven_day_omelette;
-    const showOAuthApps = isExpanded && !!latestUsageData?.seven_day_oauth_apps;
-    const showExtraUsage = isExpanded && !!latestUsageData?.extra_usage;
-    const spend = showExtraUsage ? spendAxis() : null;
-    const allValues = history.flatMap((entry) => {
-        const values = [entry.session, entry.weekly];
-        if (showSonnet) values.push(entry.sonnet || 0);
-        if (showOpus) values.push(entry.opus || 0);
-        if (showFable) values.push(entry.fable || 0);
-        if (showCowork) values.push(entry.cowork || 0);
-        if (showDesign) values.push(entry.design || 0);
-        if (showOAuthApps) values.push(entry.oauthApps || 0);
-        if (showExtraUsage && !spend) values.push(entry.extraUsage || 0);
-        return values;
+// Bucket edges in local time, from calendar arithmetic so DST days stay right
+function statsWindow(period, nowMs) {
+    const today = new Date(nowMs);
+    today.setHours(0, 0, 0, 0);
+    const buckets = [];
+    if (period === 'day') {
+        for (let h = 0; h < 24; h++) {
+            const from = new Date(today);
+            from.setHours(h);
+            const to = new Date(today);
+            to.setHours(h + 1);
+            buckets.push({ start: from.getTime(), end: to.getTime() });
+        }
+    } else {
+        const days = period === 'week' ? 7 : 30;
+        for (let i = days - 1; i >= 0; i--) {
+            const from = new Date(today);
+            from.setDate(from.getDate() - i);
+            const to = new Date(from);
+            to.setDate(to.getDate() + 1);
+            buckets.push({ start: from.getTime(), end: to.getTime() });
+        }
+    }
+    return { start: buckets[0].start, end: buckets[buckets.length - 1].end, buckets };
+}
+
+// Monthly spend is only polled while the spend is on screen; readings taken without it
+// store 0. Carry the last known value over those, so they are neither a drop nor a jump.
+function spendSeries(samples) {
+    let last = 0;
+    return samples.map((entry) => {
+        const v = entry.extraUsage || 0;
+        if (v > 0) last = v;
+        return v > 0 ? v : last;
     });
-    const yMax = Math.max(10, Math.ceil(Math.max(...allValues) / 10) * 10);
+}
 
+function computeStats(history, period, nowMs) {
+    const win = statsWindow(period, nowMs);
+    const samples = history.filter((e) => e && e.timestamp >= win.start && e.timestamp < win.end);
+    const buckets = win.buckets.map((b) => ({
+        ...b, peak: null, weekLast: null, sum: 0, n: 0, activeMs: 0, spendMax: null,
+        future: b.start > nowMs, current: b.start <= nowMs && nowMs < b.end,
+    }));
+    const spend = spendSeries(history.filter((e) => e && e.timestamp < win.end));
+    const spendOffset = spend.length - samples.length; // spend[] also covers the readings before the window
+
+    let bi = 0;
+    let nearMs = 0;
+    let activeMs = 0;
+    let sum = 0;
+    let peak = null;
+    let spendUp = 0;
+    samples.forEach((e, i) => {
+        while (bi < buckets.length - 1 && e.timestamp >= buckets[bi].end) bi++;
+        const b = buckets[bi];
+        const session = e.session || 0;
+        const weekly = e.weekly || 0;
+        b.peak = Math.max(b.peak ?? 0, session);
+        b.weekLast = weekly; // where the week stood at the end of the bucket (it resets weekly)
+        b.sum += session;
+        b.n++;
+        sum += session;
+        peak = Math.max(peak ?? 0, session);
+        const money = spend[spendOffset + i];
+        b.spendMax = Math.max(b.spendMax ?? 0, money);
+        // Spend: every rise counts, a monthly reset does not subtract
+        const before = spendOffset + i - 1 >= 0 ? spend[spendOffset + i - 1] : null;
+        if (before !== null && money > before) spendUp += money - before;
+        if (i === 0) return;
+        const prev = samples[i - 1];
+        const gap = e.timestamp - prev.timestamp;
+        if ((prev.session || 0) >= dangerThreshold) nearMs += Math.min(gap, NEAR_LIMIT_GAP_CAP);
+        if (session > (prev.session || 0) || weekly > (prev.weekly || 0)) {
+            const d = Math.min(gap, ACTIVE_GAP_CAP);
+            activeMs += d;
+            b.activeMs += d;
+        }
+    });
+
+    // Busiest bucket: the highest peak; on a tie the one with more activity, then the later
+    let busiest = null;
+    buckets.forEach((b) => {
+        if (b.peak === null) return;
+        if (!busiest || b.peak > busiest.peak || (b.peak === busiest.peak && b.activeMs >= busiest.activeMs)) busiest = b;
+    });
+
+    const money = spendAxis();
+    return {
+        period, win, buckets, samples, busiest,
+        count: samples.length,
+        peak, avg: samples.length ? sum / samples.length : null,
+        nearMs, activeMs,
+        spend: money ? { amount: spendUp * money.perPct, currency: money.currency, perPct: money.perPct } : null,
+        currentIndex: buckets.findIndex((b) => b.current),
+    };
+}
+
+// ---- formatting ----
+function fmtPct(v) {
+    return v === null || v === undefined ? '—' : `${Math.round(v)} %`;
+}
+
+function fmtDuration(ms) {
+    const total = Math.round(ms / MINUTE_MS);
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    if (h === 0) return t('dur.m', { m });
+    if (h >= 10) return t('dur.h', { h: m >= 30 ? h + 1 : h });
+    return m === 0 ? t('dur.h', { h }) : t('dur.hm', { h, m });
+}
+
+function fmtMoney(amount, currency) {
+    return formatCurrency(Math.round(amount * 100), currency);
+}
+
+function hourLabel(ms) {
+    const d = new Date(ms);
+    const tf = (window._cachedSettings || {}).timeFormat || '12h';
+    if (tf === '24h') return `${String(d.getHours()).padStart(2, '0')}:00`;
+    const h = d.getHours() % 12 || 12;
+    return `${h} ${d.getHours() >= 12 ? 'PM' : 'AM'}`;
+}
+
+function capitalize(text) {
+    return text ? text.charAt(0).toLocaleUpperCase(currentLocale()) + text.slice(1) : text;
+}
+
+function dayLabel(ms, form) {
+    const d = new Date(ms);
+    if (form === 'weekday') return capitalize(new Intl.DateTimeFormat(currentLocale(), { weekday: 'short' }).format(d));
+    if (form === 'weekdayLong') return capitalize(new Intl.DateTimeFormat(currentLocale(), { weekday: 'long' }).format(d));
+    return new Intl.DateTimeFormat(currentLocale(), { day: 'numeric', month: 'short' }).format(d);
+}
+
+// A bucket's name: '15:00', 'Fri', 'Sep 26'
+function bucketLabel(bucket, period, long) {
+    if (period === 'day') return hourLabel(bucket.start);
+    if (period === 'week') return dayLabel(bucket.start, long ? 'weekdayLong' : 'weekday');
+    return dayLabel(bucket.start, 'date');
+}
+
+// ---- rendering ----
+function markStatsPeriod() {
+    elements.statsPeriodSwitch?.querySelectorAll('[data-period]').forEach((btn) => {
+        const on = btn.dataset.period === statsPeriod;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-checked', String(on));
+    });
+}
+
+function renderStats() {
+    const section = elements.graphSection;
+    section.dataset.style = statsStyle;
+    elements.statsTitle.textContent = t(`stats.title.${statsPeriod}`);
+    markStatsPeriod();
+    if (usageChart) {
+        usageChart.destroy();
+        usageChart = null;
+    }
+    elements.statsCards.replaceChildren();
+    elements.statsHeat.replaceChildren();
+    elements.statsSummary.replaceChildren();
+
+    const stats = computeStats(statsHistory, statsPeriod, Date.now());
+    section.classList.toggle('is-empty', stats.count === 0);
+    if (stats.count === 0 || section.style.display === 'none') return;
+
+    if (statsStyle === 'summary') {
+        renderStatsCards(stats);
+        return;
+    }
+    if (statsStyle === 'bars') renderBarChart(stats);
+    else renderLineChart(stats);
+
+    const items = statsStyle === 'bars'
+        ? [
+            [t('stats.peak'), fmtPct(stats.peak)],
+            [t(stats.period === 'day' ? 'stats.busiestHour' : 'stats.busiestDay'), stats.busiest ? bucketLabel(stats.busiest, stats.period, true) : '—'],
+            [t('stats.active'), fmtDuration(stats.activeMs)],
+        ]
+        : [
+            [t('stats.peak'), fmtPct(stats.peak)],
+            [t('stats.average'), fmtPct(stats.avg)],
+            [t('stats.nearLimit'), fmtDuration(stats.nearMs)],
+            stats.spend ? [t('stats.spend'), fmtMoney(stats.spend.amount, stats.spend.currency)] : [t('stats.active'), fmtDuration(stats.activeMs)],
+        ];
+    for (const [label, value] of items) {
+        const item = document.createElement('div');
+        item.className = 'stats-item';
+        const l = document.createElement('span');
+        l.className = 'stats-item-label';
+        l.textContent = label;
+        const v = document.createElement('span');
+        v.className = 'stats-item-value';
+        v.textContent = value;
+        item.append(l, v);
+        elements.statsSummary.appendChild(item);
+    }
+}
+
+function chartFont(size, weight) {
+    return { size, weight, family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' };
+}
+
+// A day at a 15-second refresh is thousands of readings on a 500-pixel line: fold them into
+// at most maxPoints bins (the session's peak and the week's last value of each bin)
+function thinSamples(samples, maxPoints = 720) {
+    if (samples.length <= maxPoints) return samples;
+    const first = samples[0].timestamp;
+    const bin = Math.max(1, (samples[samples.length - 1].timestamp - first) / maxPoints);
+    const out = [];
+    let current = null;
+    let key = null;
+    for (const e of samples) {
+        const k = Math.floor((e.timestamp - first) / bin);
+        if (k !== key) {
+            if (current) out.push(current);
+            current = { ...e };
+            key = k;
+            continue;
+        }
+        current.session = Math.max(current.session || 0, e.session || 0);
+        current.weekly = e.weekly;
+        if (e.extraUsage > 0 || !(current.extraUsage > 0)) current.extraUsage = e.extraUsage;
+        current.timestamp = e.timestamp;
+    }
+    if (current) out.push(current);
+    return out;
+}
+
+// A: session and week over the period. Today uses every reading; a week or a month one point
+// per day (the session's peak, the week's level at the day's end), so five-hour windows
+// don't turn the line into a saw.
+function renderLineChart(stats) {
+    const ink = chartInk();
+    const { win, period } = stats;
+    const perDay = period !== 'day';
+    const mid = (b) => b.start + (b.end - b.start) / 2;
+    const readings = perDay ? [] : thinSamples(stats.samples);
+    const sessionPts = perDay
+        ? stats.buckets.filter((b) => !b.future).map((b) => ({ x: mid(b), y: b.peak }))
+        : readings.map((e) => ({ x: e.timestamp, y: e.session || 0 }));
+    const weekPts = perDay
+        ? stats.buckets.filter((b) => !b.future).map((b) => ({ x: mid(b), y: b.weekLast }))
+        : readings.map((e) => ({ x: e.timestamp, y: e.weekly || 0 }));
+    const lastSession = sessionPts.reduce((last, p, i) => (p.y !== null ? i : last), -1);
+
+    const line = {
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        pointHitRadius: 10,
+        cubicInterpolationMode: 'monotone',
+        spanGaps: false,
+    };
     const datasets = [
         {
+            ...line,
             label: t('chart.session'),
-            data: history.map((entry) => ({ x: entry.timestamp, y: entry.session })),
-            borderColor: chartInk().session,
+            data: sessionPts,
+            borderColor: ink.session,
             // A soft wash under the session line gives the chart a surface without a second colour
             backgroundColor(context) {
                 const area = context.chart.chartArea;
                 if (!area) return 'transparent';
                 const wash = context.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
-                wash.addColorStop(0, inkAlpha(chartInk().session, 0.09));
-                wash.addColorStop(1, inkAlpha(chartInk().session, 0));
+                wash.addColorStop(0, inkAlpha(ink.session, 0.1));
+                wash.addColorStop(1, inkAlpha(ink.session, 0));
                 return wash;
             },
             fill: 'origin',
-            borderWidth: 2,
-            stepped: true,
-            pointRadius: 0,
-            pointHoverRadius: 3,
-            pointHitRadius: 10
+            // The line ends in a dot: where things stand now
+            pointRadius: (ctx) => (ctx.dataIndex === lastSession ? 3 : 0),
+            pointBackgroundColor: ink.session,
+            pointBorderWidth: 0,
         },
-        {
-            label: t('chart.weekly'),
-            data: history.map((entry) => ({ x: entry.timestamp, y: entry.weekly })),
-            borderColor: chartInk().weekly,
-            backgroundColor: 'transparent',
-            borderWidth: 2,
-            stepped: true,
-            pointRadius: 0,
-            pointHoverRadius: 3,
-            pointHitRadius: 10
-        }
+        { ...line, label: t('chart.weekly'), data: weekPts, borderColor: ink.weekly, backgroundColor: 'transparent' },
     ];
 
-    if (showSonnet) {
-        const sonnetData = history.map((entry) => entry.sonnet || 0);
-        if (sonnetData.some((value) => value > 0)) {
+    // Spend on its own money axis while the model rows (and so the spend row) are open
+    const spend = isExpanded ? stats.spend : null;
+    if (spend) {
+        const money = spendSeries(readings);
+        const spendPts = perDay
+            ? stats.buckets.filter((b) => !b.future).map((b) => ({ x: mid(b), y: b.spendMax === null ? null : b.spendMax * spend.perPct }))
+            : readings.map((e, i) => ({ x: e.timestamp, y: money[i] * spend.perPct }));
+        if (spendPts.some((p) => p.y > 0)) {
             datasets.push({
-                label: 'Sonnet',
-                data: history.map((entry) => ({ x: entry.timestamp, y: entry.sonnet || 0 })),
-                borderColor: chartInk().sonnet,
+                ...line,
+                label: t('extra.label'),
+                data: spendPts,
+                yAxisID: 'spend',
+                borderColor: ink.extra,
+                borderDash: [4, 3],
                 backgroundColor: 'transparent',
-                borderWidth: 2,
-                stepped: true,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                pointHitRadius: 10
+                cubicInterpolationMode: 'default',
+                stepped: !perDay,
             });
         }
     }
 
-    if (showOpus) {
-        const opusData = history.map((entry) => entry.opus || 0);
-        if (opusData.some((value) => value > 0)) {
-            datasets.push({
-                label: 'Opus',
-                data: history.map((entry) => ({ x: entry.timestamp, y: entry.opus || 0 })),
-                borderColor: chartInk().opus,
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                stepped: true,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                pointHitRadius: 10
-            });
+    const tf = (window._cachedSettings || {}).timeFormat || '12h';
+    const ticks = [];
+    if (period === 'day') {
+        for (const h of [0, 6, 12, 18, 24]) {
+            const d = new Date(win.start);
+            d.setHours(h);
+            const label = tf === '24h' ? String(h).padStart(2, '0') : `${h % 12 || 12} ${h % 24 >= 12 ? 'PM' : 'AM'}`;
+            ticks.push({ value: d.getTime(), label });
         }
+    } else {
+        const n = stats.buckets.length;
+        stats.buckets.forEach((b, i) => {
+            // A week: every day; a month: every fifth day, counted back from today
+            if (period === 'week' || (n - 1 - i) % 5 === 0) {
+                ticks.push({ value: mid(b), label: period === 'week' ? dayLabel(b.start, 'weekday') : dayLabel(b.start, 'date') });
+            }
+        });
     }
-
-    if (showFable) {
-        const fableData = history.map((entry) => entry.fable || 0);
-        if (fableData.some((value) => value > 0)) {
-            datasets.push({
-                label: 'Fable',
-                data: history.map((entry) => ({ x: entry.timestamp, y: entry.fable || 0 })),
-                borderColor: chartInk().fable,
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                stepped: true,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                pointHitRadius: 10
-            });
-        }
-    }
-
-    if (showCowork) {
-        const coworkData = history.map((entry) => entry.cowork || 0);
-        if (coworkData.some((value) => value > 0)) {
-            datasets.push({
-                label: 'Cowork',
-                data: history.map((entry) => ({ x: entry.timestamp, y: entry.cowork || 0 })),
-                borderColor: chartInk().cowork,
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                stepped: true,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                pointHitRadius: 10
-            });
-        }
-    }
-
-    if (showDesign) {
-        const designData = history.map((entry) => entry.design || 0);
-        if (designData.some((value) => value > 0)) {
-            datasets.push({
-                label: 'Design',
-                data: history.map((entry) => ({ x: entry.timestamp, y: entry.design || 0 })),
-                borderColor: chartInk().design,
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                stepped: true,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                pointHitRadius: 10
-            });
-        }
-    }
-
-    if (showOAuthApps) {
-        const oauthAppsData = history.map((entry) => entry.oauthApps || 0);
-        if (oauthAppsData.some((value) => value > 0)) {
-            datasets.push({
-                label: 'OAuth Apps',
-                data: history.map((entry) => ({ x: entry.timestamp, y: entry.oauthApps || 0 })),
-                borderColor: chartInk().oauth,
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                stepped: true,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                pointHitRadius: 10
-            });
-        }
-    }
-
-    if (showExtraUsage) {
-        const extraUsageData = history.map((entry) => entry.extraUsage || 0);
-        if (extraUsageData.some((value) => value > 0)) {
-            datasets.push({
-            label: t('extra.label'),
-            // With a known cap it is money on its own axis, dashed so it never reads as a limit
-            data: history.map((entry) => ({ x: entry.timestamp, y: (entry.extraUsage || 0) * (spend ? spend.perPct : 1) })),
-            yAxisID: spend ? 'spend' : 'y',
-            borderColor: chartInk().extra,
-            borderDash: spend ? [4, 3] : [],
-            backgroundColor: 'transparent',
-            borderWidth: 2,
-            stepped: true,
-            pointRadius: 0,
-            pointHoverRadius: 3,
-            pointHitRadius: 10
-            });
-        }
-    }
-
-    const firstDayMidnight = new Date(history[0].timestamp);
-    firstDayMidnight.setHours(0, 0, 0, 0);
+    const tickLabels = new Map(ticks.map((tk) => [tk.value, tk.label]));
 
     usageChart = new Chart(elements.usageChart.getContext('2d'), {
         type: 'line',
@@ -1772,57 +2348,38 @@ function renderChart(history) {
             animation: false,
             responsive: true,
             maintainAspectRatio: false,
-            interaction: {
-                intersect: false,
-                mode: 'nearest'
-            },
+            layout: { padding: { top: 4, right: spend ? 0 : 6 } },
+            interaction: { intersect: false, mode: 'nearest', axis: 'x' },
             scales: {
                 x: {
                     type: 'linear',
-                    min: firstDayMidnight.getTime(),
-                    max: history[history.length - 1].timestamp,
+                    min: win.start,
+                    max: win.end,
                     afterBuildTicks(axis) {
-                        const end = history[history.length - 1].timestamp;
-                        const d = new Date(firstDayMidnight.getTime());
-                        const ticks = [];
-                        while (d.getTime() <= end) {
-                            ticks.push({ value: d.getTime() });
-                            d.setDate(d.getDate() + 1);
-                        }
-                        axis.ticks = ticks;
+                        axis.ticks = ticks.map((tk) => ({ value: tk.value }));
                     },
                     ticks: {
+                        autoSkip: false,
                         maxRotation: 0,
                         minRotation: 0,
-                        color: chartInk().text,
-                        font: {
-                            size: 10
-                        },
-                        callback(value) {
-                            const tf = (window._cachedSettings || {}).timeFormat || '12h';
-                            const spanMs = history.length > 1
-                                ? history[history.length - 1].timestamp - history[0].timestamp
-                                : 0;
-                            return formatTimestampTick(value, spanMs, tf);
-                        }
+                        color: ink.text,
+                        font: chartFont(10),
+                        callback: (value) => tickLabels.get(value) ?? '',
                     },
-                    grid: {
-                        display: false
-                    }
+                    grid: { display: false },
+                    border: { display: false },
                 },
                 y: {
                     min: 0,
-                    max: yMax,
+                    max: 100,
                     ticks: {
-                        color: chartInk().text,
-                        font: {
-                            size: 10
-                        },
-                        callback: (value) => `${value}%`
+                        stepSize: 25,
+                        color: ink.text,
+                        font: chartFont(10),
+                        callback: (value) => (value === 0 ? '0' : value % 50 === 0 ? `${value}%` : ''),
                     },
-                    grid: {
-                        color: chartInk().grid
-                    }
+                    grid: { color: ink.grid },
+                    border: { display: false },
                 },
                 ...(datasets.some((d) => d.yAxisID === 'spend') ? {
                     spend: {
@@ -1830,57 +2387,237 @@ function renderChart(history) {
                         min: 0,
                         grace: '10%',
                         ticks: {
-                            color: chartInk().text,
-                            font: {
-                                size: 10
-                            },
-                            maxTicksLimit: 5,
-                            callback: (value) => formatCurrency(Math.round(value * 100), spend.currency).replace(/\.00$/, '')
+                            color: ink.text,
+                            font: chartFont(10),
+                            maxTicksLimit: 4,
+                            callback: (value) => formatCurrency(Math.round(value * 100), spend.currency).replace(/\.00$/, ''),
                         },
-                        grid: {
-                            display: false
-                        }
-                    }
-                } : {})
+                        grid: { display: false },
+                        border: { display: false },
+                    },
+                } : {}),
             },
             plugins: {
-                legend: {
-                    display: false
-                },
+                legend: { display: false },
                 tooltip: {
-                    backgroundColor: chartInk().tipBg,
-                    titleColor: chartInk().tipInk,
-                    bodyColor: chartInk().tipInk,
-                    borderColor: chartInk().tipEdge,
+                    backgroundColor: ink.tipBg,
+                    titleColor: ink.tipInk,
+                    bodyColor: ink.tipInk,
+                    borderColor: ink.tipEdge,
                     borderWidth: 1,
                     cornerRadius: 8,
                     padding: 8,
                     boxWidth: 7,
                     boxHeight: 7,
                     usePointStyle: true,
+                    titleFont: chartFont(11, '600'),
+                    bodyFont: chartFont(11),
+                    filter: (item) => item.parsed.y !== null,
                     callbacks: {
                         labelColor(item) {
                             return { borderColor: item.dataset.borderColor, backgroundColor: item.dataset.borderColor };
                         },
                         title(items) {
-                            return new Date(items[0].parsed.x).toLocaleString(currentLocale(), {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit'
-                            });
+                            const x = items[0].parsed.x;
+                            if (!perDay) {
+                                return new Date(x).toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit', hour12: tf !== '24h' });
+                            }
+                            return new Date(x).toLocaleDateString(currentLocale(), { weekday: 'short', month: 'short', day: 'numeric' });
                         },
                         label(item) {
                             if (item.dataset.yAxisID === 'spend') {
                                 return `${item.dataset.label}: ${formatCurrency(Math.round(item.parsed.y * 100), spend.currency)}`;
                             }
                             return `${item.dataset.label}: ${Math.round(item.parsed.y)}%`;
-                        }
-                    }
-                }
-            }
-        }
+                        },
+                    },
+                },
+            },
+        },
     });
+}
+
+// B: one bar per bucket — its peak. The current bucket is marked and carries a hint;
+// hours still ahead are faint stubs.
+function renderBarChart(stats) {
+    const ink = chartInk();
+    const { buckets, period } = stats;
+    const current = stats.currentIndex;
+    const colours = buckets.map((b, i) => (i === current ? ink.weekly : b.future ? inkAlpha(ink.session, 0.1) : inkAlpha(ink.session, 0.55)));
+    const n = buckets.length;
+    const tickShown = (i) => {
+        if (period === 'week') return true;
+        if (period === 'day') return i % 6 === 0 || i === n - 1;
+        return (n - 1 - i) % 5 === 0;
+    };
+    const tickText = (i) => {
+        const b = buckets[i];
+        if (period === 'day') {
+            const h = new Date(b.start).getHours();
+            const tf = (window._cachedSettings || {}).timeFormat || '12h';
+            return tf === '24h' ? String(h).padStart(2, '0') : `${h % 12 || 12} ${h >= 12 ? 'PM' : 'AM'}`;
+        }
+        return period === 'week' ? dayLabel(b.start, 'weekday') : dayLabel(b.start, 'date');
+    };
+
+    // Keeps the hint over the current bucket whenever the pointer is not on the chart —
+    // placed again after every update, so a resize never leaves it behind
+    const pinCurrent = {
+        id: 'pinCurrent',
+        afterUpdate(chart) {
+            if (!chart.$pointerIn) pinTooltip(chart, current);
+        },
+        afterEvent(chart, args) {
+            const type = args.event.type;
+            if (type === 'mousemove') chart.$pointerIn = true;
+            if (type === 'mouseout') {
+                chart.$pointerIn = false;
+                if (pinTooltip(chart, current)) args.changed = true;
+            }
+        },
+    };
+
+    usageChart = new Chart(elements.usageChart.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: buckets.map((b, i) => String(i)),
+            datasets: [{
+                data: buckets.map((b) => (b.future ? 0 : b.peak ?? 0)),
+                backgroundColor: colours,
+                hoverBackgroundColor: colours,
+                borderRadius: 3,
+                minBarLength: 3,
+                categoryPercentage: period === 'month' ? 0.74 : 0.8,
+                barPercentage: 1,
+            }],
+        },
+        options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: { top: 30 } }, // room for the hint above a full bar
+            interaction: { intersect: false, mode: 'index' },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: {
+                        autoSkip: false,
+                        maxRotation: 0,
+                        minRotation: 0,
+                        color: ink.text,
+                        font: chartFont(10),
+                        callback: (value, index) => (tickShown(index) ? tickText(index) : ''),
+                    },
+                },
+                y: {
+                    min: 0,
+                    max: 100,
+                    ticks: { display: false, stepSize: 50 },
+                    grid: { color: ink.grid, drawTicks: false },
+                    border: { display: false },
+                },
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    // An inverted pill: light on dark, dark on light
+                    backgroundColor: ink.pillBg,
+                    bodyColor: ink.pillInk,
+                    borderWidth: 0,
+                    cornerRadius: 7,
+                    padding: { x: 8, y: 5 },
+                    caretSize: 0,
+                    yAlign: 'bottom',
+                    displayColors: false,
+                    bodyFont: chartFont(11, '600'),
+                    filter: (item) => !buckets[item.dataIndex].future,
+                    callbacks: {
+                        title: () => '',
+                        label: (item) => {
+                            const b = buckets[item.dataIndex];
+                            return `${bucketLabel(b, period)} · ${b.peak === null ? '—' : fmtPct(b.peak)}`;
+                        },
+                    },
+                },
+            },
+        },
+        plugins: [pinCurrent],
+    });
+}
+
+function pinTooltip(chart, index) {
+    if (!chart || index < 0 || !chart.tooltip) return false;
+    const bar = chart.getDatasetMeta(0).data[index];
+    if (!bar) return false;
+    chart.tooltip.setActiveElements([{ datasetIndex: 0, index }], { x: bar.x, y: bar.y });
+    return true;
+}
+
+// C: three cards with a small line each, and a strip of bucket peaks
+function renderStatsCards(stats) {
+    const ink = chartInk();
+    const upto = stats.currentIndex >= 0 ? stats.currentIndex : stats.buckets.length - 1;
+    const shown = stats.buckets.slice(0, upto + 1);
+    const cards = [
+        { label: t('stats.peak'), value: fmtPct(stats.peak), series: shown.map((b) => b.peak ?? 0), colour: ink.session },
+        { label: t('stats.average'), value: fmtPct(stats.avg), series: shown.map((b) => (b.n ? b.sum / b.n : 0)), colour: ink.weekly },
+        { label: t('stats.active'), value: fmtDuration(stats.activeMs), series: shown.map((b) => b.activeMs), colour: ink.weekly },
+    ];
+    const n = stats.buckets.length;
+    for (const card of cards) {
+        const el = document.createElement('div');
+        el.className = 'stats-card';
+        const label = document.createElement('span');
+        label.className = 'stats-card-label';
+        label.textContent = card.label;
+        const value = document.createElement('span');
+        value.className = 'stats-card-value';
+        value.textContent = card.value;
+        el.append(label, value, sparkline(card.series, n, card.colour));
+        elements.statsCards.appendChild(el);
+    }
+
+    const label = document.createElement('span');
+    label.className = 'stats-heat-label';
+    label.textContent = t(stats.period === 'day' ? 'stats.byHour' : 'stats.byDay');
+    const cells = document.createElement('div');
+    cells.className = 'stats-heat-cells';
+    cells.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+    stats.buckets.forEach((b) => {
+        const cell = document.createElement('span');
+        cell.className = 'heat-cell';
+        if (b.future) cell.classList.add('future');
+        else if (b.peak) cell.style.background = inkAlpha(ink.weekly, 0.16 + 0.84 * Math.min(b.peak, 100) / 100);
+        if (b.current) cell.classList.add('current');
+        cell.title = `${bucketLabel(b, stats.period)} · ${b.future ? '—' : fmtPct(b.peak)}`;
+        cells.appendChild(cell);
+    });
+    elements.statsHeat.append(label, cells);
+}
+
+// A small line over the whole period's width, drawn up to now
+function sparkline(series, slots, colour) {
+    const W = 142;
+    const H = 22;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'stats-spark');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    const max = Math.max(...series, 0);
+    const x = (i) => (slots > 1 ? (i / (slots - 1)) * W : W / 2);
+    const y = (v) => (max > 0 ? H - 2 - (v / max) * (H - 4) : H - 2);
+    const d = series.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(2)} ${y(v).toFixed(2)}`).join(' ');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', series.length === 1 ? `M0 ${y(series[0]).toFixed(2)} ${d.replace('M', 'L')}` : d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', colour);
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(path);
+    return svg;
 }
 
 // Graph colours follow the theme: light lines on dark, deeper ones on white (the pastels
@@ -1892,13 +2629,15 @@ function chartInk() {
             session: '#1d1d1f', weekly: '#5856d6', fable: '#0f9f7c', sonnet: '#d6336c', opus: '#b7791f',
             cowork: '#0a7fc2', design: '#7c4dff', oauth: '#6b7385', extra: '#f08c00',
             grid: 'rgba(0, 0, 0, 0.06)', text: 'rgba(29, 29, 31, 0.64)',
-            tipBg: 'rgba(255, 255, 255, 0.97)', tipInk: '#1d1d1f', tipEdge: 'rgba(0, 0, 0, 0.1)'
+            tipBg: 'rgba(255, 255, 255, 0.97)', tipInk: '#1d1d1f', tipEdge: 'rgba(0, 0, 0, 0.1)',
+            pillBg: '#1d1d1f', pillInk: '#ffffff'
         }
         : {
             session: '#f5f7fa', weekly: '#9fb4ff', fable: '#5fd4ae', sonnet: '#ff8fae', opus: '#f2c46d',
             cowork: '#62c8f5', design: '#c9a7ff', oauth: '#aab4c8', extra: '#ffb547',
             grid: 'rgba(255, 255, 255, 0.06)', text: 'rgba(245, 247, 250, 0.52)',
-            tipBg: 'rgba(44, 44, 48, 0.97)', tipInk: '#f5f7fa', tipEdge: 'rgba(255, 255, 255, 0.12)'
+            tipBg: 'rgba(44, 44, 48, 0.97)', tipInk: '#f5f7fa', tipEdge: 'rgba(255, 255, 255, 0.12)',
+            pillBg: '#f5f7fa', pillInk: '#1d1d1f'
         };
 }
 
@@ -1910,22 +2649,16 @@ function inkAlpha(hex, a) {
 
 // Spend gets its own money axis: as a share of the cap it can reach 500 % and would
 // flatten every limit line down to the floor
+// The cap is only fetched while the spend is on screen, so the last known one is kept
+let knownSpendAxis = null;
 function spendAxis() {
     const extra = latestUsageData?.extra_usage;
-    if (!extra || extra.limit_cents == null || !(extra.limit_cents > 0)) return null;
-    return { perPct: extra.limit_cents / 10000, currency: extra.currency };
-}
-
-function formatTimestampTick(timestamp, spanMs, timeFormat) {
-    const date = new Date(timestamp);
-    const hour12 = (timeFormat || '12h') !== '24h';
-
-    const time = date.toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit', hour12 });
-    if (spanMs < 12 * 60 * 60 * 1000) return time;
-    if (spanMs < 48 * 60 * 60 * 1000) {
-        return `${new Intl.DateTimeFormat(currentLocale(), { weekday: 'short' }).format(date)} ${time}`;
+    if (extra && extra.limit_cents != null && extra.limit_cents > 0) {
+        knownSpendAxis = { perPct: extra.limit_cents / 10000, currency: extra.currency };
+    } else if (extra && extra.is_enabled === false) {
+        knownSpendAxis = null;
     }
-    return date.toLocaleDateString(currentLocale(), { month: 'short', day: 'numeric' });
+    return knownSpendAxis;
 }
 
 // Add spinning animation for refresh button
@@ -1941,6 +2674,273 @@ style.textContent = `
     }
 `;
 document.head.appendChild(style);
+
+// ---------- Menu bar picture (macOS) ----------
+// One status item with both numbers, drawn here on a canvas at 2x (36 px = 18 pt) in the
+// system font with tabular digits, and handed to main.js as a PNG. Below the warn
+// threshold it is a template image (black, dimmed parts by alpha) that macOS tints like
+// its own icons; from the threshold on, the value that crossed it is drawn in colour for
+// the current menu bar appearance and everything else in plain white or black.
+const TRAY_STYLES = ['ring', 'bars', 'rings', 'ringsText'];
+const TRAY_HEIGHT = 36;
+const TRAY_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif';
+const TRAY_ACCENTS = {
+    dark: { warn: '#ffb340', danger: '#ff6259' },
+    light: { warn: '#c26a00', danger: '#d70015' },
+};
+let trayCanvas = null;
+let lastTrayPush = '';
+
+function trayLevel(value) {
+    return value >= dangerThreshold ? 'danger' : value >= warnThreshold ? 'warn' : null;
+}
+
+// Widest digit of the current font: every digit is drawn centred in a cell this wide
+function digitCell(ctx) {
+    let widest = 0;
+    for (const d of '0123456789') widest = Math.max(widest, ctx.measureText(d).width);
+    return widest;
+}
+
+function drawDigits(ctx, text, x, baseline, cell) {
+    for (const ch of text) {
+        const w = ctx.measureText(ch).width;
+        ctx.fillText(ch, x + (cell - w) / 2, baseline);
+        x += cell;
+    }
+    return x;
+}
+
+// Baseline that centres the digits on a line
+function digitBaseline(ctx, centreY) {
+    const m = ctx.measureText('0');
+    return centreY + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+}
+
+function trayRing(ctx, cx, cy, r, lineWidth, share, colour, ink, comet) {
+    ctx.lineWidth = lineWidth;
+    ctx.globalAlpha = 0.32;
+    ctx.strokeStyle = ink;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = colour;
+    const top = -Math.PI / 2;
+    if (comet !== undefined) {
+        // Refreshing: a short comet, its tail in fading segments
+        const length = 0.3;
+        const parts = 6;
+        for (let i = 0; i < parts; i++) {
+            const from = comet - length + (length * i) / parts;
+            const to = from + (length / parts) * (i === parts - 1 ? 1 : 0.8);
+            ctx.globalAlpha = 0.14 + 0.86 * ((i + 1) / parts);
+            ctx.lineCap = i === parts - 1 ? 'round' : 'butt';
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, top + Math.PI * 2 * from, top + Math.PI * 2 * to);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        return;
+    }
+    if (share <= 0) return;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, top, top + Math.PI * 2 * Math.min(share, 1));
+    ctx.stroke();
+}
+
+function trayBar(ctx, x, cy, length, share, colour, ink, segment) {
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.roundRect(x, cy - 3, length, 6, 3);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = colour;
+    let from = 0;
+    let to = share;
+    if (segment) [from, to] = segment; // refreshing: a short bright piece of the track
+    else if (share <= 0) return;
+    const w = Math.max(6, length * (to - from));
+    ctx.beginPath();
+    ctx.roundRect(x + length * from, cy - 3, Math.min(w, length - length * from), 6, 3);
+    ctx.fill();
+}
+
+// o: { style, session, week, refreshing, template, ink, accents }
+function drawTrayPicture(canvas, o) {
+    const ctx = canvas.getContext('2d');
+    const session = Math.round(Math.min(Math.max(o.session || 0, 0), 100));
+    const week = Math.round(Math.min(Math.max(o.week || 0, 0), 100));
+    const colourOf = (value) => {
+        const level = trayLevel(value);
+        return o.template || !level ? o.ink : o.accents[level];
+    };
+    const sColour = colourOf(session);
+    const wColour = colourOf(week);
+    const sText = String(session);
+    const wText = String(week);
+    const numbersAlpha = o.refreshing ? 0.45 : 1;
+    const bigFont = `500 26px ${TRAY_FONT}`;
+    const smallFont = `600 18px ${TRAY_FONT}`;
+    const gap = 6;
+
+    // Measure first: setting the canvas size resets the context
+    ctx.font = bigFont;
+    const bigCell = digitCell(ctx);
+    const dotWidth = ctx.measureText('·').width;
+    ctx.font = smallFont;
+    const smallCell = digitCell(ctx);
+    const stackWidth = Math.max(sText.length, wText.length) * smallCell;
+    let width;
+    if (o.style === 'bars') width = 41 + stackWidth + 2;
+    else if (o.style === 'rings') width = 32;
+    else if (o.style === 'ringsText') width = 39 + stackWidth + 2;
+    else width = 38 + (sText.length + wText.length) * bigCell + gap * 2 + dotWidth + 2;
+    canvas.width = Math.ceil(width / 2) * 2;
+    canvas.height = TRAY_HEIGHT;
+
+    const stacked = (x) => {
+        ctx.font = smallFont;
+        ctx.globalAlpha = numbersAlpha;
+        ctx.fillStyle = sColour;
+        drawDigits(ctx, sText, x, digitBaseline(ctx, 10.5), smallCell);
+        ctx.fillStyle = wColour;
+        drawDigits(ctx, wText, x, digitBaseline(ctx, 26.5), smallCell);
+        ctx.globalAlpha = 1;
+    };
+
+    if (o.style === 'bars') {
+        trayBar(ctx, 2, 10.5, 34, session / 100, sColour, o.ink, o.refreshing ? [0.22, 0.5] : null);
+        trayBar(ctx, 2, 26.5, 34, week / 100, wColour, o.ink, o.refreshing ? [0.52, 0.8] : null);
+        stacked(41);
+    } else if (o.style === 'rings' || o.style === 'ringsText') {
+        trayRing(ctx, 16, 18, 13, 3.4, session / 100, sColour, o.ink, o.refreshing ? 0.36 : undefined);
+        trayRing(ctx, 16, 18, 6.6, 3.4, week / 100, wColour, o.ink, o.refreshing ? 0.86 : undefined);
+        if (o.style === 'ringsText') stacked(39);
+    } else {
+        trayRing(ctx, 15, 18, 11.5, 3.6, session / 100, sColour, o.ink, o.refreshing ? 0.36 : undefined);
+        ctx.font = bigFont;
+        const baseline = digitBaseline(ctx, 18);
+        ctx.globalAlpha = numbersAlpha;
+        ctx.fillStyle = sColour;
+        let x = drawDigits(ctx, sText, 38, baseline, bigCell) + gap;
+        ctx.globalAlpha = 0.5 * numbersAlpha;
+        ctx.fillStyle = o.ink;
+        ctx.fillText('·', x, baseline);
+        x += dotWidth + gap;
+        ctx.globalAlpha = numbersAlpha;
+        ctx.fillStyle = wColour;
+        drawDigits(ctx, wText, x, baseline, bigCell);
+        ctx.globalAlpha = 1;
+    }
+}
+
+function currentTrayValues() {
+    if (!latestUsageData) return null;
+    return {
+        session: latestUsageData.five_hour?.utilization || 0,
+        week: latestUsageData.seven_day?.utilization || 0,
+    };
+}
+
+// Draw and hand over the menu bar picture — only on a Mac, only while the numbers are on
+function pushTrayImage(force = false) {
+    if (window.electronAPI.platform !== 'darwin' || !window.electronAPI.setTrayImage) return;
+    const sheetOpen = elements.settingsOverlay.style.display === 'flex';
+    const on = !!(window._cachedSettings || {}).showTrayStats || (sheetOpen && elements.showTrayStatsToggle.checked);
+    if (!on) return;
+    const values = currentTrayValues();
+    if (!values) return;
+    const template = !trayLevel(values.session) && !trayLevel(values.week);
+    trayCanvas = trayCanvas || document.createElement('canvas');
+    drawTrayPicture(trayCanvas, {
+        style: trayStyle,
+        ...values,
+        refreshing: trayRefreshing,
+        template,
+        ink: template || !menuBarDark ? '#000000' : '#ffffff',
+        accents: TRAY_ACCENTS[menuBarDark ? 'dark' : 'light'],
+    });
+    const png = trayCanvas.toDataURL('image/png');
+    const key = `${template}|${png}`;
+    if (!force && key === lastTrayPush) return;
+    lastTrayPush = key;
+    window.electronAPI.setTrayImage({ png, template });
+}
+
+// Settings: each look drawn as it would appear, in the theme's ink
+function drawTrayPreviews() {
+    const light = document.body.classList.contains('theme-light');
+    const values = currentTrayValues() || { session: 35, week: 12 };
+    elements.trayStylePicker?.querySelectorAll('[data-tray-style]').forEach((btn) => {
+        const canvas = btn.querySelector('canvas');
+        if (!canvas) return;
+        drawTrayPicture(canvas, {
+            style: btn.dataset.trayStyle,
+            ...values,
+            refreshing: false,
+            template: false,
+            ink: light ? '#1d1d1f' : '#f5f7fa',
+            accents: TRAY_ACCENTS[light ? 'light' : 'dark'],
+        });
+        canvas.style.width = `${canvas.width / 2}px`;
+        canvas.style.height = `${TRAY_HEIGHT / 2}px`;
+    });
+}
+
+// ---------- Looks: pickers, ring style, threshold ticks ----------
+function markPicker(picker, key, value) {
+    picker?.querySelectorAll('button').forEach((btn) => {
+        const on = btn.dataset[key] === value;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-checked', String(on));
+    });
+}
+
+function applyGaugeStyle(style) {
+    gaugeStyle = style === 'concentric' ? 'concentric' : 'rings';
+    document.body.classList.toggle('gauges-b', gaugeStyle === 'concentric');
+    markPicker(elements.gaugeStylePicker, 'gaugeStyle', gaugeStyle);
+}
+
+// The menu bar row: a Mac-only choice, quiet while the numbers are off
+function applyTrayStyleRowState() {
+    const row = elements.trayStyleCol;
+    if (!row) return;
+    row.style.display = window.electronAPI.platform === 'darwin' ? '' : 'none';
+    row.classList.toggle('settings-col-disabled', !elements.showTrayStatsToggle.checked);
+}
+
+// Two dots on each ring's track mark the warn and danger thresholds (the ring is turned
+// by CSS so that angle 0 is twelve o'clock)
+function placeThresholdTicks() {
+    const place = (tick, pct) => {
+        if (!tick) return;
+        const angle = 2 * Math.PI * Math.min(Math.max(pct, 0), 100) / 100;
+        tick.setAttribute('cx', (48 + 42 * Math.cos(angle)).toFixed(2));
+        tick.setAttribute('cy', (48 + 42 * Math.sin(angle)).toFixed(2));
+    };
+    document.querySelectorAll('.gauge .ring').forEach((svg) => {
+        place(svg.querySelector('.ring-tick-warn'), warnThreshold);
+        place(svg.querySelector('.ring-tick-danger'), dangerThreshold);
+    });
+}
+
+// Settings sheet height from its content: header, every visible group, footer
+function settingsSheetHeight() {
+    const content = elements.settingsOverlay.querySelector('.settings-content');
+    const header = content.querySelector('.settings-header');
+    const body = content.querySelector('.settings-body');
+    const footer = content.querySelector('.settings-footer');
+    const cs = getComputedStyle(body);
+    const shown = [...body.children].filter((child) => child.offsetParent !== null || getComputedStyle(child).display !== 'none');
+    let height = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    shown.forEach((child) => { height += child.getBoundingClientRect().height; });
+    height += (parseFloat(cs.rowGap) || 0) * Math.max(0, shown.length - 1);
+    return Math.ceil(header.getBoundingClientRect().height + height + footer.getBoundingClientRect().height);
+}
 
 // Settings management
 let warnThreshold = 75;
@@ -1989,6 +2989,15 @@ async function loadSettings() {
     if (window.electronAPI.platform === 'darwin') {
         applyTrayLabel();
     }
+
+    // Looks
+    trayStyle = TRAY_STYLES.includes(settings.trayStyle) ? settings.trayStyle : 'ring';
+    statsStyle = STATS_STYLES.includes(settings.statsStyle) ? settings.statsStyle : 'line';
+    applyGaugeStyle(settings.gaugeStyle);
+    markPicker(elements.trayStylePicker, 'trayStyle', trayStyle);
+    markPicker(elements.statsStylePicker, 'statsStyle', statsStyle);
+    applyTrayStyleRowState();
+    drawTrayPreviews();
 }
 
 async function saveSettings() {
@@ -2020,7 +3029,12 @@ async function saveSettings() {
         usageAlerts: elements.usageAlertsToggle.checked,
         compactMode: isCompactMode,
         graphVisible: graphVisible,
-        expandedOpen: isExpanded
+        expandedOpen: isExpanded,
+        compactSpendOpen: compactSpendOpen,
+        trayStyle,
+        gaugeStyle,
+        statsStyle,
+        statsPeriod
     };
     await window.electronAPI.saveSettings(settings);
     window._cachedSettings = settings;
@@ -2028,6 +3042,10 @@ async function saveSettings() {
     if (window.electronAPI.platform === 'darwin') {
         applyTrayLabel();
     }
+    placeThresholdTicks();
+    // The tray item may have just been created or rebuilt: always hand it a fresh picture
+    pushTrayImage(true);
+    if (graphVisible) renderStats();
 
     // Re-render resets-at values immediately with new format
     if (latestUsageData) {
@@ -2105,7 +3123,11 @@ function applyTheme(theme) {
     const changed = document.body.classList.contains('theme-light') === useDark;
     document.body.classList.toggle('theme-light', !useDark);
     // The chart paints its colours once — repaint it in the new ink
-    if (changed && graphVisible && latestUsageData) loadChart();
+    if (changed && graphVisible && latestUsageData) {
+        if (statsHistory.length) renderStats();
+        else loadChart();
+    }
+    if (changed && elements.settingsOverlay.style.display === 'flex') drawTrayPreviews();
 }
 
 // 'Auto' follows macOS live, and settles once the native theme has switched over

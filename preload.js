@@ -72,5 +72,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showNotification: (title, body) => ipcRenderer.send('show-notification', { title, body }),
 
   // Compact mode
-  setCompactMode: (compact) => ipcRenderer.send('set-compact-mode', compact)
+  setCompactMode: (compact) => ipcRenderer.send('set-compact-mode', compact),
+
+  // macOS menu bar: the window draws the picture ({ png: data URL, template: boolean })
+  setTrayImage: (payload) => ipcRenderer.send('set-tray-image', payload),
+  getMenuBarDark: () => ipcRenderer.invoke('get-menu-bar-dark'),
+  onMenuBarAppearance: (callback) => {
+    ipcRenderer.on('menu-bar-appearance', (event, dark) => callback(!!dark));
+  }
 });

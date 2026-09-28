@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, session, shell, Notification, safeStorage, nativeImage, screen, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, session, shell, Notification, safeStorage, nativeImage, screen, nativeTheme, systemPreferences } = require('electron');
 const path = require('path');
 const https = require('https');
 const Store = require('electron-store');
@@ -77,8 +77,11 @@ function debugLog(...args) {
 const CHROME_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 let mainWindow = null;
-let sessionTray = null;  // Tray icon for Session usage
-let weeklyTray = null;   // Tray icon for Weekly usage
+let sessionTray = null;  // Tray icon for Session usage (on macOS the one item that shows both)
+let weeklyTray = null;   // Tray icon for Weekly usage (Windows/Linux only)
+// macOS: the menu bar picture is drawn by the window (see 'set-tray-image'); the last one
+// is kept so a recreated tray item shows it straight away
+let lastTrayImage = null;
 
 // Set on 'before-quit', which fires before any window's 'close' event on
 // every genuine quit path (Exit menu item, Cmd+Q, OS shutdown). Without
@@ -101,7 +104,12 @@ const COMPACT_HEIGHT = 105;
 const COMPACT_ROW_HEIGHT = 28; // extra height per optional row (Fable, Spend)
 const COMPACT_CHEVRON_HEIGHT = 15; // the always-visible spend toggle chevron
 const COMPACT_BANNER_HEIGHT = 28; // matches BANNER_HEIGHT in the renderer's resizeWidget()
-const HISTORY_RETENTION_DAYS = 8;
+// Statistics look back up to 30 days. The last FULL_RES_DAYS keep every reading; older
+// readings are folded into one per hour so a month of history stays small on disk.
+const HISTORY_RETENTION_DAYS = 32;
+const FULL_RES_DAYS = 8;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 // Compact mode always shows Session + Weekly plus the spend chevron; grows by
 // one row when the account has a scoped Fable weekly limit
@@ -118,8 +126,40 @@ function getCompactHeight() {
   if (store.get('updateBannerVisible', false)) height += COMPACT_BANNER_HEIGHT;
   return height;
 }
-const CHART_DAYS = 7;
-const MAX_HISTORY_SAMPLES = 10000; // Cap total samples to prevent unbounded growth
+const CHART_DAYS = 31;
+const MAX_HISTORY_SAMPLES = 10000; // Cap on the full-resolution part (see compactHistory)
+
+// Keeps history bounded: drops readings past the retention window, keeps the newest
+// readings (younger than FULL_RES_DAYS, at most MAX_HISTORY_SAMPLES of them) as they are,
+// and folds everything older — including what the cap pushes out — into one reading per
+// hour: the highest value of each field, stamped with the latest time of that hour.
+// Idempotent, so it can run on every write and again at startup.
+function compactHistory(history, now = Date.now()) {
+  const retentionCutoff = now - HISTORY_RETENTION_DAYS * DAY_MS;
+  const fullResCutoff = now - FULL_RES_DAYS * DAY_MS;
+  const kept = history
+    .filter((entry) => entry && typeof entry.timestamp === 'number' && entry.timestamp > retentionCutoff)
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  let firstRecent = kept.findIndex((entry) => entry.timestamp >= fullResCutoff);
+  if (firstRecent === -1) firstRecent = kept.length;
+  firstRecent = Math.max(firstRecent, kept.length - MAX_HISTORY_SAMPLES);
+
+  const hours = new Map();
+  for (const entry of kept.slice(0, firstRecent)) {
+    const key = Math.floor(entry.timestamp / HOUR_MS);
+    const merged = hours.get(key);
+    if (!merged) {
+      hours.set(key, { ...entry });
+      continue;
+    }
+    for (const [field, value] of Object.entries(entry)) {
+      if (typeof value !== 'number') continue;
+      merged[field] = field in merged && typeof merged[field] === 'number' ? Math.max(merged[field], value) : value;
+    }
+  }
+  return [...hours.values()].sort((a, b) => a.timestamp - b.timestamp).concat(kept.slice(firstRecent));
+}
 
 function storeUsageHistory(data) {
   // Skip write if the session is invalid — a live session always has resets_at timestamps.
@@ -148,15 +188,8 @@ function storeUsageHistory(data) {
     extraUsage: data.extra_usage?.utilization || 0
   });
 
-  // Rotation: apply both time-based and count-based limits
-  const cutoff = timestamp - (HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  history = history.filter((entry) => entry.timestamp > cutoff);
-
-  if (history.length > MAX_HISTORY_SAMPLES) {
-    history = history.slice(history.length - MAX_HISTORY_SAMPLES);
-  }
-
-  store.set(historyKey, history);
+  // Rotation: retention window, hourly folding of older readings, cap on the rest
+  store.set(historyKey, compactHistory(history, timestamp));
 }
 
 // Migrate legacy single-key history to the per-org namespaced key at startup,
@@ -175,14 +208,14 @@ function migrateUsageHistoryKey() {
 }
 
 // Prune all per-org history keys at startup. Trims entries older than the retention
-// window and deletes the key entirely if nothing remains — cleans up abandoned accounts.
+// window, folds older readings into hourly ones, and deletes the key entirely if nothing
+// remains — cleans up abandoned accounts.
 function pruneStaleHistoryKeys() {
-  const cutoff = Date.now() - (HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const allKeys = Object.keys(store.store);
   for (const key of allKeys) {
     if (!key.startsWith('usageHistory_') && key !== 'usageHistory') continue;
     const history = store.get(key, []);
-    const fresh = history.filter((entry) => entry.timestamp > cutoff);
+    const fresh = compactHistory(Array.isArray(history) ? history : []);
     if (fresh.length === 0) {
       store.delete(key);
       debugLog('[History] Deleted stale key:', key);
@@ -704,21 +737,32 @@ function createTray() {
     return;
   }
 
+  // macOS shows one item with both numbers; elsewhere two items, one per limit.
+  const singleItem = process.platform === 'darwin';
+
   // Rebuild from a clean state if only one of the two stats tray icons survived.
   const hasSessionTray = sessionTray && !sessionTray.isDestroyed();
   const hasWeeklyTray = weeklyTray && !weeklyTray.isDestroyed();
-  if (hasSessionTray && hasWeeklyTray) return;
-  if (hasSessionTray || hasWeeklyTray) destroyTrayIcons();
+  if (singleItem) {
+    if (hasSessionTray && !hasWeeklyTray) return;
+    if (hasSessionTray || hasWeeklyTray) destroyTrayIcons();
+  } else {
+    if (hasSessionTray && hasWeeklyTray) return;
+    if (hasSessionTray || hasWeeklyTray) destroyTrayIcons();
+  }
 
   try {
     const staticIconPath = path.join(__dirname, process.platform === 'darwin' ? 'assets/tray-icon-mac.png' : process.platform === 'linux' ? 'assets/tray-icon-linux.png' : 'assets/tray-icon.png');
     
-    // Create Weekly tray icon FIRST (left position, blue)
-    weeklyTray = new Tray(staticIconPath);
-    weeklyTray.setToolTip(tt('weekly'));
+    if (!singleItem) {
+      // Create Weekly tray icon FIRST (left position, blue)
+      weeklyTray = new Tray(staticIconPath);
+      weeklyTray.setToolTip(tt('weekly'));
+    }
     
-    // Create Session tray icon SECOND (right position, purple)
-    sessionTray = new Tray(staticIconPath);
+    // Create Session tray icon SECOND (right position, purple). On macOS it is the only
+    // item: it shows the picture the window last drew, or the plain icon until then.
+    sessionTray = new Tray(singleItem && lastTrayImage ? lastTrayImage : staticIconPath);
     sessionTray.setToolTip(tt('session'));
 
     const contextMenu = Menu.buildFromTemplate([
@@ -766,24 +810,19 @@ function createTray() {
     ]);
 
     sessionTray.setContextMenu(contextMenu);
-    weeklyTray.setContextMenu(contextMenu);
+    if (weeklyTray) weeklyTray.setContextMenu(contextMenu);
+
+    const toggleWindow = () => {
+      if (isMainWindowShownOnScreen()) {
+        mainWindow.hide();
+      } else {
+        showMainWindowSmart();
+      }
+    };
 
     // Click handlers - swapped order
-        weeklyTray.on('click', () => {
-      if (isMainWindowShownOnScreen()) {
-        mainWindow.hide();
-      } else {
-        showMainWindowSmart();
-      }
-    });
-    
-        sessionTray.on('click', () => {
-      if (isMainWindowShownOnScreen()) {
-        mainWindow.hide();
-      } else {
-        showMainWindowSmart();
-      }
-    });
+    if (weeklyTray) weeklyTray.on('click', toggleWindow);
+    sessionTray.on('click', toggleWindow);
   } catch (error) {
     console.error('Failed to create tray:', error);
   }
@@ -876,6 +915,27 @@ function formatResetTime(resetsAt, timeFormat, includeDate = false) {
  */
 function updateTrayIcon(usageData) {
   const showTrayStats = store.get('settings.showTrayStats', false);
+
+  // macOS: one item, its picture drawn by the window ('set-tray-image') — here only the
+  // tooltip, two lines: the session with its reset time, the week with its reset date
+  if (process.platform === 'darwin') {
+    if (!showTrayStats) return;
+    createTray();
+    if (!sessionTray || sessionTray.isDestroyed()) return;
+    const timeFormat = store.get('settings.timeFormat', '12h');
+    const line = (label, percent, resetText) => `${label}: ${Math.round(percent || 0)}%${resetText ? ` · ${resetText}` : ''}`;
+    const sessionReset = formatResetTime(usageData?.five_hour?.resets_at, timeFormat, false);
+    const weeklyReset = formatResetTime(usageData?.seven_day?.resets_at, timeFormat, true);
+    try {
+      sessionTray.setToolTip([
+        line(tt('session'), usageData?.five_hour?.utilization, sessionReset && tt('resetsAt', { t: sessionReset })),
+        line(tt('weekly'), usageData?.seven_day?.utilization, weeklyReset && tt('resets', { t: weeklyReset }))
+      ].join('\n'));
+    } catch (error) {
+      console.error('Failed to update tray tooltip:', error);
+    }
+    return;
+  }
   
   if (!showTrayStats) {
     // Destroy only weeklyTray, keeping sessionTray alive as a persistent restore
@@ -1135,7 +1195,7 @@ ipcMain.handle('get-usage-history', () => {
   const organizationId = store.get('organizationId');
   const historyKey = organizationId ? `usageHistory_${organizationId}` : 'usageHistory';
   const history = store.get(historyKey, []);
-  const cutoff = Date.now() - (CHART_DAYS * 24 * 60 * 60 * 1000);
+  const cutoff = Date.now() - (CHART_DAYS * DAY_MS);
   return history
     .filter((entry) => entry.timestamp > cutoff)
     .sort((a, b) => a.timestamp - b.timestamp);
@@ -1170,6 +1230,38 @@ function applyNativeTheme(theme) {
 // Live preview while the theme buttons are clicked; saving stores it
 ipcMain.on('set-theme', (event, theme) => applyNativeTheme(theme));
 
+// macOS menu bar picture, drawn by the window on a canvas at 2x (18 pt high). A template
+// image is tinted by the system like its own icons; a coloured one (a limit is close)
+// is drawn for the current menu bar appearance.
+ipcMain.on('set-tray-image', (event, payload) => {
+  if (process.platform !== 'darwin') return;
+  const png = payload && payload.png;
+  const prefix = 'data:image/png;base64,';
+  if (typeof png !== 'string' || !png.startsWith(prefix) || png.length > 2_000_000) return;
+  try {
+    const image = nativeImage.createFromBuffer(Buffer.from(png.slice(prefix.length), 'base64'), { scaleFactor: 2 });
+    if (image.isEmpty()) return;
+    image.setTemplateImage(!!payload.template);
+    lastTrayImage = image;
+    if (sessionTray && !sessionTray.isDestroyed()) sessionTray.setImage(image);
+  } catch (error) {
+    console.error('Failed to set tray image:', error);
+  }
+});
+
+// Whether the menu bar is dark. Not nativeTheme: its themeSource follows the widget theme
+// (applyNativeTheme), while the menu bar follows the system appearance.
+function isMenuBarDark() {
+  if (process.platform !== 'darwin') return false;
+  try {
+    return systemPreferences.getUserDefault('AppleInterfaceStyle', 'string') === 'Dark';
+  } catch {
+    return false;
+  }
+}
+
+ipcMain.handle('get-menu-bar-dark', () => isMenuBarDark());
+
 // Settings handlers
 ipcMain.handle('get-settings', () => {
   return {
@@ -1188,7 +1280,11 @@ ipcMain.handle('get-settings', () => {
     graphVisible: store.get('settings.graphVisible', false),
     expandedOpen: store.get('settings.expandedOpen', false),
     compactSpendOpen: store.get('settings.compactSpendOpen', false),
-    showTrayStats: store.get('settings.showTrayStats', false)
+    showTrayStats: store.get('settings.showTrayStats', false),
+    trayStyle: store.get('settings.trayStyle', 'ring'),
+    gaugeStyle: store.get('settings.gaugeStyle', 'rings'),
+    statsStyle: store.get('settings.statsStyle', 'line'),
+    statsPeriod: store.get('settings.statsPeriod', 'day')
   };
 });
 
@@ -1216,6 +1312,10 @@ ipcMain.handle('save-settings', (event, settings) => {
     store.set('settings.compactSpendOpen', settings.compactSpendOpen);
   }
   store.set('settings.showTrayStats', settings.showTrayStats);
+  // Looks: menu bar picture, rings, statistics. Guarded like compactSpendOpen above.
+  for (const key of ['trayStyle', 'gaugeStyle', 'statsStyle', 'statsPeriod']) {
+    if (settings[key] !== undefined) store.set(`settings.${key}`, settings[key]);
+  }
   const languageChanged = settings.language !== undefined && settings.language !== store.get('settings.language', 'en');
   if (settings.language !== undefined) store.set('settings.language', settings.language);
   // New language: the menu bar icons carry their own menu and tooltips — rebuild them
@@ -1710,6 +1810,18 @@ app.whenReady().then(async () => {
 
   applyNativeTheme(store.get('settings.theme', 'dark'));
   createMainWindow();
+
+  // The menu bar picture is drawn for the menu bar's appearance: tell the window when
+  // macOS switches between light and dark (the default is read a moment later, once set)
+  if (process.platform === 'darwin') {
+    systemPreferences.subscribeNotification('AppleInterfaceThemeChangedNotification', () => {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('menu-bar-appearance', isMenuBarDark());
+        }
+      }, 150);
+    });
+  }
   // Avoid creating temporary tray icons during startup when tray stats are disabled.
   if (store.get('settings.showTrayStats', false)) {
     createTray();

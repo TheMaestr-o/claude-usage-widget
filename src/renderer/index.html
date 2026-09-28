@@ -131,12 +131,23 @@
 
                 <!-- Two rings: the thick arc is how much of the limit is used, the thin inner arc
                      is how much of the window's time has passed. Ids match the old bars — app.js
-                     updates them. -->
+                     updates them. Style B (body.gauges-b) lays the same elements out as one ring
+                     inside the other, so the data code never needs to know which one is shown.
+                     The arc gradient runs from the arc's start (12 o'clock once the ring is
+                     turned by CSS) along its first quarter; it turns together with the arc. -->
                 <div class="gauges">
                     <div class="gauge" id="sessionGauge">
                         <div class="gauge-ring">
                             <svg class="ring" width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">
+                                <defs>
+                                    <linearGradient id="sessionArcGradient" gradientUnits="userSpaceOnUse" x1="90" y1="48" x2="48" y2="90">
+                                        <stop class="arc-stop-a" offset="0" />
+                                        <stop class="arc-stop-b" offset="1" />
+                                    </linearGradient>
+                                </defs>
                                 <circle class="ring-track" cx="48" cy="48" r="42" />
+                                <circle class="ring-tick ring-tick-warn" cx="48" cy="6" r="1.9" />
+                                <circle class="ring-tick ring-tick-danger" cx="48" cy="6" r="1.9" />
                                 <circle class="ring-usage" id="sessionProgress" cx="48" cy="48" r="42"
                                     data-c="263.89" style="stroke-dasharray: 263.89; stroke-dashoffset: 263.89" />
                                 <circle class="ring-time-track" cx="48" cy="48" r="33" />
@@ -147,6 +158,7 @@
                         </div>
                         <div class="gauge-meta">
                             <span class="gauge-label" data-i18n="gauge.session">Session · 5 h</span>
+                            <div class="gauge-meta-pct" id="sessionMetaPct"></div>
                             <div class="gauge-countdown timer-text" id="sessionTimeText" data-precise="1">--:--</div>
                             <div class="gauge-reset resets-at-text" id="sessionResetsAt">--</div>
                         </div>
@@ -155,7 +167,15 @@
                     <div class="gauge" id="weeklyGauge">
                         <div class="gauge-ring">
                             <svg class="ring" width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">
+                                <defs>
+                                    <linearGradient id="weeklyArcGradient" gradientUnits="userSpaceOnUse" x1="90" y1="48" x2="48" y2="90">
+                                        <stop class="arc-stop-a" offset="0" />
+                                        <stop class="arc-stop-b" offset="1" />
+                                    </linearGradient>
+                                </defs>
                                 <circle class="ring-track" cx="48" cy="48" r="42" />
+                                <circle class="ring-tick ring-tick-warn" cx="48" cy="6" r="1.9" />
+                                <circle class="ring-tick ring-tick-danger" cx="48" cy="6" r="1.9" />
                                 <circle class="ring-usage weekly" id="weeklyProgress" cx="48" cy="48" r="42"
                                     data-c="263.89" style="stroke-dasharray: 263.89; stroke-dashoffset: 263.89" />
                                 <circle class="ring-time-track" cx="48" cy="48" r="33" />
@@ -166,6 +186,7 @@
                         </div>
                         <div class="gauge-meta">
                             <span class="gauge-label" data-i18n="gauge.weekly">Week · all models</span>
+                            <div class="gauge-meta-pct" id="weeklyMetaPct"></div>
                             <div class="gauge-countdown timer-text" id="weeklyTimeText" data-precise="1">--:--</div>
                             <div class="gauge-reset resets-at-text" id="weeklyResetsAt">--</div>
                         </div>
@@ -184,8 +205,26 @@
                     <div id="extraRows"></div>
                 </div>
 
-                <div class="graph-section" id="graphSection" style="display: none;">
-                    <canvas id="usageChart"></canvas>
+                <!-- Statistics: a period switch and one of three looks (body.stats-line / -bars /
+                     -summary), all fed by the same history (see renderStats in app.js) -->
+                <div class="graph-section stats-section" id="graphSection" style="display: none;">
+                    <div class="stats-head">
+                        <span class="stats-title" id="statsTitle"></span>
+                        <div class="stats-period segmented" role="radiogroup" id="statsPeriodSwitch">
+                            <button class="segment-btn" data-period="day" role="radio" data-i18n="stats.day">Today</button>
+                            <button class="segment-btn" data-period="week" role="radio" data-i18n="stats.week">Week</button>
+                            <button class="segment-btn" data-period="month" role="radio" data-i18n="stats.month">Month</button>
+                        </div>
+                    </div>
+                    <div class="stats-body">
+                        <div class="stats-chart" id="statsChart">
+                            <canvas id="usageChart"></canvas>
+                        </div>
+                        <div class="stats-cards" id="statsCards"></div>
+                        <div class="stats-heat" id="statsHeat"></div>
+                        <div class="stats-summary" id="statsSummary"></div>
+                        <p class="stats-empty" id="statsEmpty" data-i18n="stats.empty">No data for this period yet</p>
+                    </div>
                 </div>
             </div>
 
@@ -359,15 +398,53 @@
                                 </select>
                             </div>
                         </div>
+
+                        <!-- Looks: the menu bar picture (macOS), the rings, the statistics -->
+                        <div class="settings-group settings-looks">
+                            <div class="setting-field setting-field-wide" id="trayStyleCol">
+                                <span class="setting-label" data-i18n="settings.menuBar">Menu bar</span>
+                                <div class="tray-style-picker segmented" role="radiogroup" id="trayStylePicker">
+                                    <button class="segment-btn tray-style-btn" data-tray-style="ring" role="radio" data-i18n-title="tray.ring" title="Ring and numbers"><canvas></canvas></button>
+                                    <button class="segment-btn tray-style-btn" data-tray-style="bars" role="radio" data-i18n-title="tray.bars" title="Two bars"><canvas></canvas></button>
+                                    <button class="segment-btn tray-style-btn" data-tray-style="rings" role="radio" data-i18n-title="tray.rings" title="Double ring"><canvas></canvas></button>
+                                    <button class="segment-btn tray-style-btn" data-tray-style="ringsText" role="radio" data-i18n-title="tray.ringsText" title="Double ring and numbers"><canvas></canvas></button>
+                                </div>
+                            </div>
+                            <div class="setting-field">
+                                <span class="setting-label" data-i18n="settings.rings">Rings</span>
+                                <div class="glyph-picker segmented" role="radiogroup" id="gaugeStylePicker">
+                                    <button class="segment-btn glyph-btn" data-gauge-style="rings" role="radio" data-i18n-title="rings.side" title="Side by side">
+                                        <svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5.5" cy="7" r="4.4" /><circle cx="16.5" cy="7" r="4.4" /></svg>
+                                    </button>
+                                    <button class="segment-btn glyph-btn" data-gauge-style="concentric" role="radio" data-i18n-title="rings.nested" title="Ring in ring">
+                                        <svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="7" r="6" /><circle cx="11" cy="7" r="2.6" /></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="setting-field">
+                                <span class="setting-label" data-i18n="settings.stats">Statistics</span>
+                                <div class="glyph-picker segmented" role="radiogroup" id="statsStylePicker">
+                                    <button class="segment-btn glyph-btn" data-stats-style="line" role="radio" data-i18n-title="statsStyle.line" title="Line">
+                                        <svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="2 11 7 7 11 9 16 3 20 5" /></svg>
+                                    </button>
+                                    <button class="segment-btn glyph-btn" data-stats-style="bars" role="radio" data-i18n-title="statsStyle.bars" title="Bars">
+                                        <svg width="22" height="14" viewBox="0 0 22 14" fill="currentColor"><rect x="3" y="7" width="3" height="6" rx="1" /><rect x="9.5" y="2" width="3" height="11" rx="1" /><rect x="16" y="5" width="3" height="8" rx="1" /></svg>
+                                    </button>
+                                    <button class="segment-btn glyph-btn" data-stats-style="summary" role="radio" data-i18n-title="statsStyle.summary" title="Summary">
+                                        <svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="3" width="5.5" height="8" rx="1.6" /><rect x="8.25" y="3" width="5.5" height="8" rx="1.6" /><rect x="15" y="3" width="5.5" height="8" rx="1.6" /></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="settings-footer">
-                        <span class="settings-version-label" id="settingsVersionLabel">Version</span>
+                        <span class="settings-version-label"><span id="settingsVersionLabel">Version</span><span class="settings-signature"> · <i>The</i> Maestro</span></span>
                         <span class="settings-update-link" id="settingsUpdateLink" style="display: none;"></span>
                         <span class="settings-disclaimer" data-i18n="settings.disclaimer">Unofficial app — not affiliated with Anthropic.</span>
                         <span class="settings-spacer"></span>
                         <button class="logout-btn" id="logoutBtn" data-i18n="settings.logout">Log out</button>
-                        <button class="coffee-btn" id="coffeeBtn">
+                        <button class="coffee-btn" id="coffeeBtn" data-i18n-tip="settings.supportHint" title="Original widget by Slavomir Durej">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M17 8h1a4 4 0 1 1 0 8h-1" />
