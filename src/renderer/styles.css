@@ -2625,3 +2625,189 @@ body:not(.glass-off) .open-browser-link { color: var(--accent); }
 body:not(.glass-off) .widget-container:has(> .settings-overlay[style*='display: flex']) > :not(.settings-overlay) {
     visibility: hidden;
 }
+
+/* ==========================================================================
+   Light theme, v2 — white glass (2026-09-28)
+   main.js now switches the native window material together with the theme, so in light
+   the glass underneath is light as well and the tint only brightens it. Every text colour
+   keeps at least 4.5:1 against it; colour on its own marks only thresholds and money.
+   ========================================================================== */
+
+body {
+    --btn: transparent;
+    --btn-hover: rgba(255, 255, 255, 0.12);
+    --btn-active: rgba(255, 255, 255, 0.18);
+    --warn-ink: #ffb547;
+    --danger-ink: #ff6961;
+    --ok-ink: #30d158;
+    --ok-fill: rgba(48, 209, 88, 0.14);
+    --ok-edge: rgba(48, 209, 88, 0.36);
+    --lift: drop-shadow(0 0 4px rgba(255, 255, 255, 0.16));
+    --lift-weekly: drop-shadow(0 0 5px rgba(159, 180, 255, 0.4));
+}
+
+body.theme-light {
+    --glass-fill: rgba(255, 255, 255, 0.55);
+    --glass-edge: rgba(0, 0, 0, 0.08);
+    --glass-hi: rgba(255, 255, 255, 0.9);
+    --ink: #1d1d1f;
+    --ink-2: rgba(29, 29, 31, 0.74);
+    --ink-3: rgba(29, 29, 31, 0.64);
+    --track: rgba(0, 0, 0, 0.075);
+    --time: rgba(0, 0, 0, 0.34);
+    --session: #1d1d1f;
+    --weekly: #5856d6;
+    --warn: #ff9500;
+    --danger: #ff3b30;
+    --warn-ink: #b25000;
+    --danger-ink: #d70015;
+    --ok-ink: #146c2e;
+    --ok-fill: rgba(52, 199, 89, 0.14);
+    --ok-edge: rgba(52, 199, 89, 0.4);
+    --btn: transparent;
+    --btn-hover: rgba(0, 0, 0, 0.065);
+    --btn-active: rgba(0, 0, 0, 0.11);
+    --lift: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.22));
+    --lift-weekly: drop-shadow(0 1px 3.5px rgba(88, 86, 214, 0.42));
+}
+
+/* Title buttons: clean icons at rest, a soft disc under the pointer */
+body:not(.glass-off) .control-btn:active {
+    background: var(--btn-active);
+    transform: scale(0.92);
+}
+
+/* The arcs sit slightly above the glass: a glow on dark, a coloured shadow on white */
+body:not(.glass-off) .ring-usage {
+    filter: var(--lift);
+}
+
+body:not(.glass-off) .ring-usage.weekly {
+    filter: var(--lift-weekly);
+}
+
+body:not(.glass-off) .gauge.is-danger .gauge-num {
+    color: var(--danger-ink);
+}
+
+/* A small share still reads as a short bar, not a dot */
+body:not(.glass-off) .progress-fill.has-value {
+    min-width: 8px;
+}
+
+body:not(.glass-off) .compact-bar-fill.has-value {
+    min-width: 10px;
+}
+
+/* Spend and credits — the author's fixed greys vanished on a light window */
+body:not(.glass-off) .extra-status {
+    padding: 2px 5px;
+    border-radius: 4px;
+    letter-spacing: 0.06em;
+}
+
+body:not(.glass-off) .extra-status.on {
+    background: var(--ok-fill);
+    color: var(--ok-ink);
+    border: 0.5px solid var(--ok-edge);
+}
+
+body:not(.glass-off) .extra-status.off {
+    background: var(--field);
+    color: var(--ink-2);
+    border: 0.5px solid var(--hairline);
+}
+
+body:not(.glass-off) .spend-cap-text {
+    font-size: 11.5px;
+    opacity: 1;
+}
+
+body:not(.glass-off) .spend-cap-text.extra-spending {
+    font-weight: 500;
+    color: var(--ink-2);
+}
+
+body:not(.glass-off) .spend-cap-text .spend-used {
+    font-weight: 600;
+    color: var(--ink);
+}
+
+body:not(.glass-off) .spend-cap-text .spend-used.over {
+    color: var(--danger-ink);
+}
+
+body:not(.glass-off) .credits-amount {
+    font-size: 11.5px;
+    color: var(--ink);
+}
+
+body:not(.glass-off) .credits-split,
+body:not(.glass-off) .timer-text.extra-balance-label,
+body:not(.glass-off) .resets-at-text.extra-balance-amount {
+    color: var(--ink-2);
+}
+
+body:not(.glass-off) .credits-split {
+    font-size: 10.5px;
+}
+
+body.theme-light:not(.glass-off) .credits-chip {
+    background: rgba(255, 149, 0, 0.12);
+    color: var(--warn-ink);
+    border-color: rgba(255, 149, 0, 0.35);
+}
+
+body.theme-light:not(.glass-off) .credits-chip.danger {
+    background: rgba(255, 59, 48, 0.1);
+    color: var(--danger-ink);
+    border-color: rgba(255, 59, 48, 0.3);
+}
+
+/* Compact view — readable at a glance */
+body:not(.glass-off) .compact-label {
+    font-size: 11.5px;
+    color: var(--ink-2);
+}
+
+body:not(.glass-off) .compact-pct {
+    width: 36px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+body:not(.glass-off) .compact-bar-fill {
+    opacity: 1;
+}
+
+body:not(.glass-off) .compact-collapse-btn,
+body:not(.glass-off) .compact-expand-btn {
+    color: var(--ink-2);
+}
+
+body:not(.glass-off) .compact-collapse-btn:hover,
+body:not(.glass-off) .compact-expand-btn:hover {
+    color: var(--ink);
+    background: var(--btn-hover);
+}
+
+/* System accessibility settings */
+@media (prefers-reduced-transparency: reduce) {
+    body:not(.glass-off) .widget-container { background: #1e1e21; }
+    body.theme-light:not(.glass-off) .widget-container { background: #f5f5f7; }
+}
+
+@media (prefers-contrast: more) {
+    body:not(.theme-light) {
+        --ink-2: rgba(245, 247, 250, 0.86);
+        --ink-3: rgba(245, 247, 250, 0.72);
+        --track: rgba(255, 255, 255, 0.18);
+    }
+
+    body.theme-light {
+        --ink-2: rgba(29, 29, 31, 0.86);
+        --ink-3: rgba(29, 29, 31, 0.76);
+        --track: rgba(0, 0, 0, 0.14);
+    }
+}

@@ -605,6 +605,26 @@ function formatCurrency(amountCents, currencyCode) {
   return sym ? `${sym}${amount}` : `${amount} ${currencyCode || 'USD'}`;
 }
 
+// A translated phrase with some values styled apart: the word order belongs to the
+// language, so the phrase is cut around markers instead of being glued back by hand
+function fillPhrase(el, key, parts) {
+    const names = Object.keys(parts);
+    const marked = t(key, Object.fromEntries(names.map((name, i) => [name, `\u0001${i}\u0002`])));
+    el.textContent = '';
+    for (const piece of marked.split(/(\u0001\d+\u0002)/)) {
+        const mark = piece.match(/^\u0001(\d+)\u0002$/);
+        if (!mark) {
+            if (piece) el.appendChild(document.createTextNode(piece));
+            continue;
+        }
+        const [text, className] = parts[names[Number(mark[1])]];
+        const span = document.createElement('span');
+        span.className = className;
+        span.textContent = text;
+        el.appendChild(span);
+    }
+}
+
 // Extra row label mapping for API fields
 // Row label in the current language: '<Model> · week', or a fixed key
 function rowLabel(config) {
@@ -740,6 +760,7 @@ function buildExtraRows(data) {
             const progressFill = document.createElement('div');
             progressFill.className = `progress-fill ${colorClass}`;
             progressFill.style.width = `${Math.min(utilization, 100)}%`;
+            progressFill.classList.toggle('has-value', utilization > 0);
 
             // Apply warning/danger thresholds to extra usage bar
             if (utilization >= dangerThreshold) {
@@ -759,7 +780,11 @@ function buildExtraRows(data) {
                 spendText.className = 'usage-percentage extra-spending spend-cap-text';
                 let limitStr = formatCurrency(value.limit_cents, value.currency);
                 if (value.limit_cents % 100 === 0) limitStr = limitStr.replace('.00', '');
-                spendText.textContent = t('spend.of', { used: formatCurrency(value.used_cents, value.currency), limit: limitStr });
+                const over = value.used_cents > value.limit_cents;
+                fillPhrase(spendText, 'spend.of', {
+                    used: [formatCurrency(value.used_cents, value.currency), over ? 'spend-used over' : 'spend-used'],
+                    limit: [limitStr, 'spend-limit']
+                });
             } else {
                 spendText.className = 'usage-percentage spend-cap-text';
                 spendText.textContent = `${Math.round(utilization)}%`;
@@ -775,6 +800,7 @@ function buildExtraRows(data) {
             const progressFill = document.createElement('div');
             progressFill.className = `progress-fill ${colorClass}`;
             progressFill.style.width = `${Math.min(utilization, 100)}%`;
+            progressFill.classList.toggle('has-value', utilization > 0);
             // Apply warning/danger thresholds — same check the spend row and
             // compact mode already use, previously missing here so every
             // model row (Sonnet, Opus, Fable, etc.) rendered flat regardless
@@ -1112,6 +1138,10 @@ function updateCompactBars(data) {
     if (weeklyPct >= dangerThreshold) elements.compactWeeklyFill.classList.add('danger');
     else if (weeklyPct >= warnThreshold) elements.compactWeeklyFill.classList.add('warning');
 
+    // A small share still reads as a short bar, not a dot
+    elements.compactSessionFill.classList.toggle('has-value', sessionPct > 0);
+    elements.compactWeeklyFill.classList.toggle('has-value', weeklyPct > 0);
+
     // Fable — only shown when the account has a scoped Fable weekly limit
     // (data.seven_day_fable, normalized centrally by main.js before this ever
     // reaches the renderer — see src/normalize-usage-limits.js)
@@ -1123,6 +1153,7 @@ function updateCompactBars(data) {
         elements.compactFableFill.className = 'compact-bar-fill fable';
         if (fablePct >= dangerThreshold) elements.compactFableFill.classList.add('danger');
         else if (fablePct >= warnThreshold) elements.compactFableFill.classList.add('warning');
+        elements.compactFableFill.classList.toggle('has-value', fablePct > 0);
     } else {
         elements.compactFableRow.style.display = 'none';
     }
@@ -1137,6 +1168,7 @@ function updateCompactBars(data) {
         elements.compactSpendFill.className = 'compact-bar-fill spend';
         if (spendPct >= dangerThreshold) elements.compactSpendFill.classList.add('danger');
         else if (spendPct >= warnThreshold) elements.compactSpendFill.classList.add('warning');
+        elements.compactSpendFill.classList.toggle('has-value', spendPct > 0);
     }
 }
 
@@ -1560,6 +1592,7 @@ function renderChart(history) {
     const showDesign = isExpanded && !!latestUsageData?.seven_day_omelette;
     const showOAuthApps = isExpanded && !!latestUsageData?.seven_day_oauth_apps;
     const showExtraUsage = isExpanded && !!latestUsageData?.extra_usage;
+    const spend = showExtraUsage ? spendAxis() : null;
     const allValues = history.flatMap((entry) => {
         const values = [entry.session, entry.weekly];
         if (showSonnet) values.push(entry.sonnet || 0);
@@ -1568,7 +1601,7 @@ function renderChart(history) {
         if (showCowork) values.push(entry.cowork || 0);
         if (showDesign) values.push(entry.design || 0);
         if (showOAuthApps) values.push(entry.oauthApps || 0);
-        if (showExtraUsage) values.push(entry.extraUsage || 0);
+        if (showExtraUsage && !spend) values.push(entry.extraUsage || 0);
         return values;
     });
     const yMax = Math.max(10, Math.ceil(Math.max(...allValues) / 10) * 10);
@@ -1578,7 +1611,16 @@ function renderChart(history) {
             label: t('chart.session'),
             data: history.map((entry) => ({ x: entry.timestamp, y: entry.session })),
             borderColor: chartInk().session,
-            backgroundColor: 'transparent',
+            // A soft wash under the session line gives the chart a surface without a second colour
+            backgroundColor(context) {
+                const area = context.chart.chartArea;
+                if (!area) return 'transparent';
+                const wash = context.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+                wash.addColorStop(0, inkAlpha(chartInk().session, 0.09));
+                wash.addColorStop(1, inkAlpha(chartInk().session, 0));
+                return wash;
+            },
+            fill: 'origin',
             borderWidth: 2,
             stepped: true,
             pointRadius: 0,
@@ -1705,8 +1747,11 @@ function renderChart(history) {
         if (extraUsageData.some((value) => value > 0)) {
             datasets.push({
             label: t('extra.label'),
-            data: history.map((entry) => ({ x: entry.timestamp, y: entry.extraUsage || 0 })),
+            // With a known cap it is money on its own axis, dashed so it never reads as a limit
+            data: history.map((entry) => ({ x: entry.timestamp, y: (entry.extraUsage || 0) * (spend ? spend.perPct : 1) })),
+            yAxisID: spend ? 'spend' : 'y',
             borderColor: chartInk().extra,
+            borderDash: spend ? [4, 3] : [],
             backgroundColor: 'transparent',
             borderWidth: 2,
             stepped: true,
@@ -1778,14 +1823,45 @@ function renderChart(history) {
                     grid: {
                         color: chartInk().grid
                     }
-                }
+                },
+                ...(datasets.some((d) => d.yAxisID === 'spend') ? {
+                    spend: {
+                        position: 'right',
+                        min: 0,
+                        grace: '10%',
+                        ticks: {
+                            color: chartInk().text,
+                            font: {
+                                size: 10
+                            },
+                            maxTicksLimit: 5,
+                            callback: (value) => formatCurrency(Math.round(value * 100), spend.currency).replace(/\.00$/, '')
+                        },
+                        grid: {
+                            display: false
+                        }
+                    }
+                } : {})
             },
             plugins: {
                 legend: {
                     display: false
                 },
                 tooltip: {
+                    backgroundColor: chartInk().tipBg,
+                    titleColor: chartInk().tipInk,
+                    bodyColor: chartInk().tipInk,
+                    borderColor: chartInk().tipEdge,
+                    borderWidth: 1,
+                    cornerRadius: 8,
+                    padding: 8,
+                    boxWidth: 7,
+                    boxHeight: 7,
+                    usePointStyle: true,
                     callbacks: {
+                        labelColor(item) {
+                            return { borderColor: item.dataset.borderColor, backgroundColor: item.dataset.borderColor };
+                        },
                         title(items) {
                             return new Date(items[0].parsed.x).toLocaleString(currentLocale(), {
                                 month: 'short',
@@ -1795,6 +1871,9 @@ function renderChart(history) {
                             });
                         },
                         label(item) {
+                            if (item.dataset.yAxisID === 'spend') {
+                                return `${item.dataset.label}: ${formatCurrency(Math.round(item.parsed.y * 100), spend.currency)}`;
+                            }
                             return `${item.dataset.label}: ${Math.round(item.parsed.y)}%`;
                         }
                     }
@@ -1804,13 +1883,37 @@ function renderChart(history) {
     });
 }
 
-// Graph colours follow the theme: light lines on dark, dark lines on light
+// Graph colours follow the theme: light lines on dark, deeper ones on white (the pastels
+// that glow on dark wash out on a light window)
 function chartInk() {
     const light = document.body.classList.contains('theme-light');
-    const models = { fable: '#5fd4ae', sonnet: '#ff8fae', opus: '#f2c46d', cowork: '#62c8f5', design: '#c9a7ff', oauth: '#aab4c8', extra: '#ffb547' };
     return light
-        ? { ...models, session: '#1d1d1f', weekly: '#5b6cff', grid: 'rgba(0, 0, 0, 0.06)', text: 'rgba(29, 29, 31, 0.55)' }
-        : { ...models, session: '#f5f7fa', weekly: '#9fb4ff', grid: 'rgba(255, 255, 255, 0.06)', text: 'rgba(245, 247, 250, 0.5)' };
+        ? {
+            session: '#1d1d1f', weekly: '#5856d6', fable: '#0f9f7c', sonnet: '#d6336c', opus: '#b7791f',
+            cowork: '#0a7fc2', design: '#7c4dff', oauth: '#6b7385', extra: '#f08c00',
+            grid: 'rgba(0, 0, 0, 0.06)', text: 'rgba(29, 29, 31, 0.64)',
+            tipBg: 'rgba(255, 255, 255, 0.97)', tipInk: '#1d1d1f', tipEdge: 'rgba(0, 0, 0, 0.1)'
+        }
+        : {
+            session: '#f5f7fa', weekly: '#9fb4ff', fable: '#5fd4ae', sonnet: '#ff8fae', opus: '#f2c46d',
+            cowork: '#62c8f5', design: '#c9a7ff', oauth: '#aab4c8', extra: '#ffb547',
+            grid: 'rgba(255, 255, 255, 0.06)', text: 'rgba(245, 247, 250, 0.52)',
+            tipBg: 'rgba(44, 44, 48, 0.97)', tipInk: '#f5f7fa', tipEdge: 'rgba(255, 255, 255, 0.12)'
+        };
+}
+
+// '#rrggbb' at the given opacity — for the soft fill under the session line
+function inkAlpha(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+// Spend gets its own money axis: as a share of the cap it can reach 500 % and would
+// flatten every limit line down to the floor
+function spendAxis() {
+    const extra = latestUsageData?.extra_usage;
+    if (!extra || extra.limit_cents == null || !(extra.limit_cents > 0)) return null;
+    return { perPct: extra.limit_cents / 10000, currency: extra.currency };
 }
 
 function formatTimestampTick(timestamp, spanMs, timeFormat) {
@@ -1991,11 +2094,24 @@ function applyLanguage(lang) {
     }
 }
 
+let themeSetting = 'dark';
+const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
 function applyTheme(theme) {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const useDark = theme === 'dark' || (theme === 'system' && prefersDark);
+    themeSetting = theme;
+    // The window glass is native: main.js switches it to the same theme
+    window.electronAPI.setTheme?.(theme);
+    const useDark = theme === 'dark' || (theme === 'system' && darkQuery.matches);
+    const changed = document.body.classList.contains('theme-light') === useDark;
     document.body.classList.toggle('theme-light', !useDark);
+    // The chart paints its colours once — repaint it in the new ink
+    if (changed && graphVisible && latestUsageData) loadChart();
 }
+
+// 'Auto' follows macOS live, and settles once the native theme has switched over
+darkQuery.addEventListener('change', () => {
+    if (themeSetting === 'system') applyTheme('system');
+});
 
 // Update check
 async function checkForUpdate() {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, session, shell, Notification, safeStorage, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, session, shell, Notification, safeStorage, nativeImage, screen, nativeTheme } = require('electron');
 const path = require('path');
 const https = require('https');
 const Store = require('electron-store');
@@ -1160,6 +1160,16 @@ ipcMain.on('set-compact-mode', (event, compact) => {
   }
 });
 
+// The macOS glass under the window follows the app appearance, not our CSS: a light theme
+// over the dark system material reads as muddy grey. So the widget theme drives the native
+// one too ('system' follows macOS and switches with it).
+function applyNativeTheme(theme) {
+  nativeTheme.themeSource = theme === 'light' || theme === 'dark' ? theme : 'system';
+}
+
+// Live preview while the theme buttons are clicked; saving stores it
+ipcMain.on('set-theme', (event, theme) => applyNativeTheme(theme));
+
 // Settings handlers
 ipcMain.handle('get-settings', () => {
   return {
@@ -1190,6 +1200,7 @@ ipcMain.handle('save-settings', (event, settings) => {
   store.set('settings.minimizeToTray', settings.minimizeToTray);
   store.set('settings.alwaysOnTop', settings.alwaysOnTop);
   store.set('settings.theme', settings.theme);
+  applyNativeTheme(settings.theme);
   store.set('settings.warnThreshold', settings.warnThreshold);
   store.set('settings.dangerThreshold', settings.dangerThreshold);
   store.set('settings.timeFormat', settings.timeFormat);
@@ -1697,6 +1708,7 @@ app.whenReady().then(async () => {
   migrateUsageHistoryKey();
   pruneStaleHistoryKeys();
 
+  applyNativeTheme(store.get('settings.theme', 'dark'));
   createMainWindow();
   // Avoid creating temporary tray icons during startup when tray stats are disabled.
   if (store.get('settings.showTrayStats', false)) {
